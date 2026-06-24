@@ -42,6 +42,7 @@ export default function App() {
   const [canScroll, setCanScroll] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   function measureScroll() {
     const el = listRef.current;
@@ -77,12 +78,16 @@ export default function App() {
     setLoading(true);
     scrollToBottom();
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     let acc = "";
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: baseItems }),
+        signal: controller.signal,
       });
       if (!res.ok || !res.body) throw new Error(`Erro ${res.status}`);
 
@@ -100,18 +105,33 @@ export default function App() {
         });
       }
     } catch (err) {
-      console.error(err);
-      setItems((prev) => {
-        const next = [...prev];
-        next[next.length - 1] = {
-          role: "model",
-          text: "⚠️ Não consegui responder. Verifique se o backend está rodando.",
-        };
-        return next;
-      });
+      if ((err as Error)?.name === "AbortError") {
+        // Interrompido pela pessoa: preserva o texto parcial já recebido.
+        const { text: msg, options } = parseOptions(acc);
+        setItems((prev) => {
+          const next = [...prev];
+          next[next.length - 1] = { role: "model", text: msg, options };
+          return next;
+        });
+      } else {
+        console.error(err);
+        setItems((prev) => {
+          const next = [...prev];
+          next[next.length - 1] = {
+            role: "model",
+            text: "⚠️ Não consegui responder. Verifique se o backend está rodando.",
+          };
+          return next;
+        });
+      }
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
+  }
+
+  function stop() {
+    abortRef.current?.abort();
   }
 
   function sendMessage() {
@@ -212,26 +232,34 @@ export default function App() {
             placeholder="Digite sua mensagem..."
             rows={1}
           />
-          <button
-            className="send-btn"
-            onClick={sendMessage}
-            disabled={loading || !input.trim()}
-            aria-label="Enviar"
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {loading ? (
+            <button className="send-btn" onClick={stop} aria-label="Parar resposta">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="6" width="12" height="12" rx="2" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              className="send-btn"
+              onClick={sendMessage}
+              disabled={!input.trim()}
+              aria-label="Enviar"
             >
-              <line x1="12" y1="19" x2="12" y2="5" />
-              <polyline points="5 12 12 5 19 12" />
-            </svg>
-          </button>
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="19" x2="12" y2="5" />
+                <polyline points="5 12 12 5 19 12" />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
     </div>

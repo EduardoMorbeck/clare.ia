@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -10,11 +11,21 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 ROUTER = build_router_from_env()
 
+# Quantas mensagens (no máximo) do histórico são reenviadas ao modelo. Mantém
+# custo e latência sob controle em conversas longas, preservando o fim recente.
+MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
+
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+    if o.strip()
+]
+
 app = FastAPI(title="clare.ia")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -72,7 +83,6 @@ class Message(BaseModel):
 
 class ChatConfig(BaseModel):
     temperature: float | None = 0.7
-    system_instruction: str | None = None
     max_output_tokens: int | None = 2048
 
 class ChatRequest(BaseModel):
@@ -82,11 +92,14 @@ class ChatRequest(BaseModel):
 @app.post("/api/chat")
 def chat(req: ChatRequest):
     cfg = req.config or ChatConfig()
-    system_instruction = cfg.system_instruction or (PERSONA + OPCOES)
+    # A persona (e seus guardrails de segurança) é sempre definida no servidor —
+    # o cliente nunca pode sobrescrevê-la.
+    system_instruction = PERSONA + OPCOES
+    messages = req.messages[-MAX_HISTORY_MESSAGES:]
 
     def generate():
         yield from ROUTER.stream_chat(
-            req.messages,
+            messages,
             system_instruction,
             cfg.temperature,
             cfg.max_output_tokens,
