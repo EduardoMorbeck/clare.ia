@@ -79,6 +79,14 @@
   max-width: 520px;
 }
 
+.provider-tag {
+  align-self: flex-start;
+  margin: -4px 0 0 4px;
+  font-size: 10.5px;
+  color: #565d6b;
+  letter-spacing: 0.02em;
+}
+
 .reply-options {
   align-self: flex-start;
   display: flex;

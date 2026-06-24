@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { parseOptions } from "./parseOptions";
 import "./App.css";
 
-type Item = { role: "user" | "model"; text: string; options?: string[] };
+type Item = { role: "user" | "model"; text: string; options?: string[]; provider?: string };
 
 const STARTERS: { label: string; text: string }[] = [
   { label: "Não sei explicar", text: "Não sei explicar direito o que estou sentindo..." },
@@ -13,26 +14,6 @@ const STARTERS: { label: string; text: string }[] = [
   { label: "Aconteceu algo e não sei como me sinto", text: "Aconteceu uma coisa e não sei bem como me sinto sobre isso..." },
   { label: "Quero entender o que sinto", text: "Queria entender melhor o que estou sentindo..." },
 ];
-
-const OPCOES_MARK = "[[OPCOES]]";
-
-function parseOptions(raw: string): { text: string; options: string[] } {
-  const idx = raw.indexOf(OPCOES_MARK);
-  if (idx >= 0) {
-    const text = raw.slice(0, idx).trimEnd();
-    const options = raw
-      .slice(idx + OPCOES_MARK.length)
-      .split("|")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    return { text, options };
-  }
-  const partial = raw.lastIndexOf("[[");
-  if (partial >= 0 && OPCOES_MARK.startsWith(raw.slice(partial).trimEnd())) {
-    return { text: raw.slice(0, partial).trimEnd(), options: [] };
-  }
-  return { text: raw, options: [] };
-}
 
 export default function App() {
   const [items, setItems] = useState<Item[]>([]);
@@ -91,6 +72,7 @@ export default function App() {
       });
       if (!res.ok || !res.body) throw new Error(`Erro ${res.status}`);
 
+      const provider = res.headers.get("X-LLM-Provider") || undefined;
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       while (true) {
@@ -100,7 +82,7 @@ export default function App() {
         const { text: msg, options } = parseOptions(acc);
         setItems((prev) => {
           const next = [...prev];
-          next[next.length - 1] = { role: "model", text: msg, options };
+          next[next.length - 1] = { role: "model", text: msg, options, provider };
           return next;
         });
       }
@@ -110,7 +92,8 @@ export default function App() {
         const { text: msg, options } = parseOptions(acc);
         setItems((prev) => {
           const next = [...prev];
-          next[next.length - 1] = { role: "model", text: msg, options };
+          const provider = next[next.length - 1]?.provider;
+          next[next.length - 1] = { role: "model", text: msg, options, provider };
           return next;
         });
       } else {
@@ -154,7 +137,9 @@ export default function App() {
       <header className="header">
         <span className="header-title">clare.ia</span>
         <span className="header-note">
-          Esta é uma ferramenta de reflexão e não substitui acompanhamento profissional
+          Ferramenta de reflexão — não substitui acompanhamento profissional. Suas
+          mensagens são processadas por serviços de IA externos; evite compartilhar
+          dados sensíveis.
         </span>
       </header>
 
@@ -199,6 +184,9 @@ export default function App() {
                   item.text
                 )}
               </div>
+              {item.role === "model" && item.text && item.provider && item.provider !== "none" && (
+                <span className="provider-tag">via {item.provider}</span>
+              )}
               {showOptions && (
                 <div className="reply-options">
                   {item.options!.map((opt, k) => (

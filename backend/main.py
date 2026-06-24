@@ -1,10 +1,18 @@
 import os
+import re
 from pathlib import Path
+from typing import Literal
+
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.responses import PlainTextResponse
+
 from providers import build_router_from_env
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -15,19 +23,38 @@ ROUTER = build_router_from_env()
 # custo e latência sob controle em conversas longas, preservando o fim recente.
 MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
 
+# Tamanho máximo (em caracteres) de uma única mensagem. Protege contra custo
+# descontrolado de tokens e abuso. Mensagens maiores são recusadas com HTTP 422.
+MAX_MESSAGE_CHARS = int(os.getenv("MAX_MESSAGE_CHARS", "4000"))
+
+# Limite de requisições por IP no endpoint de chat (formato do slowapi).
+CHAT_RATE_LIMIT = os.getenv("CHAT_RATE_LIMIT", "30/minute")
+
 ALLOWED_ORIGINS = [
     o.strip()
     for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
     if o.strip()
 ]
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="clare.ia")
+app.state.limiter = limiter
+app.add_exception_handler(
+    RateLimitExceeded,
+    lambda request, exc: PlainTextResponse(
+        "Muitas mensagens em pouco tempo. Respire fundo e tente de novo em instantes. 🌱",
+        status_code=429,
+    ),
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Permite que o frontend leia qual provedor de IA respondeu.
+    expose_headers=["X-LLM-Provider"],
 )
 
 PERSONA = (
@@ -77,35 +104,83 @@ OPCOES = (
     "- As sugestões são um convite: a pessoa pode ignorá-las e escrever livremente."
 )
 
+# Sinais de risco à própria vida na ÚLTIMA mensagem da pessoa. Lista deliberadamente
+# de alta especificidade para minimizar falsos positivos — se acionar, garantimos
+# (de forma determinística, sem depender só do modelo) que o contato do CVV apareça.
+RISK_PATTERNS = re.compile(
+    r"(me matar|tirar minha vida|dar fim (à|a) (minha )?vida|acabar com tudo|"
+    r"não quero (mais )?viver|cansad[oa] de viver|melhor (se eu )?morr|"
+    r"queria (sumir|morrer|não existir)|me machucar|me cortar|"
+    r"suic[íi]d|automutila)",
+    re.IGNORECASE,
+)
+
+SUPPORT_NOTE = (
+    "\n\nSe você está passando por um momento muito difícil, por favor não enfrente "
+    "isso sozinho(a): o **CVV** atende 24h, de graça e em sigilo, pelo telefone "
+    "**188** ou em cvv.org.br. Se houver risco imediato, ligue **192** (SAMU)."
+)
+
+MARK = "[[OPCOES]]"
+
+def _ensure_support_note(full: str) -> str:
+    """Insere a nota do CVV antes da linha [[OPCOES]] se ela ainda não aparecer."""
+    if "188" in full:
+        return full
+    idx = full.find(MARK)
+    if idx >= 0:
+        return full[:idx].rstrip() + SUPPORT_NOTE + "\n\n" + full[idx:]
+    return full.rstrip() + SUPPORT_NOTE
+
 class Message(BaseModel):
-    role: str
-    text: str
+    role: Literal["user", "model"]
+    text: str = Field(min_length=1, max_length=MAX_MESSAGE_CHARS)
 
 class ChatConfig(BaseModel):
     temperature: float | None = 0.7
     max_output_tokens: int | None = 2048
 
 class ChatRequest(BaseModel):
-    messages: list[Message]
+    messages: list[Message] = Field(min_length=1)
     config: ChatConfig | None = ChatConfig()
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "providers": ROUTER.names}
+
 @app.post("/api/chat")
-def chat(req: ChatRequest):
+@limiter.limit(CHAT_RATE_LIMIT)
+def chat(request: Request, req: ChatRequest):
     cfg = req.config or ChatConfig()
     # A persona (e seus guardrails de segurança) é sempre definida no servidor —
     # o cliente nunca pode sobrescrevê-la.
     system_instruction = PERSONA + OPCOES
     messages = req.messages[-MAX_HISTORY_MESSAGES:]
 
-    def generate():
-        yield from ROUTER.stream_chat(
-            messages,
-            system_instruction,
-            cfg.temperature,
-            cfg.max_output_tokens,
-        )
+    last_user = next((m.text for m in reversed(messages) if m.role == "user"), "")
+    risk = bool(RISK_PATTERNS.search(last_user))
 
-    return StreamingResponse(generate(), media_type="text/plain; charset=utf-8")
+    provider_name, gen = ROUTER.open_stream(
+        messages,
+        system_instruction,
+        cfg.temperature,
+        cfg.max_output_tokens,
+    )
+
+    def generate():
+        if risk:
+            # Em situação de risco, garantimos a presença do CVV. Bufferizamos a
+            # resposta (caso raro) para inserir a nota na posição correta, antes
+            # das opções de resposta — vale abrir mão do streaming pela segurança.
+            yield _ensure_support_note("".join(gen))
+        else:
+            yield from gen
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/plain; charset=utf-8",
+        headers={"X-LLM-Provider": provider_name or "none"},
+    )
 
 if __name__ == "__main__":
     import uvicorn

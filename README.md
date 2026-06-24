@@ -11,13 +11,28 @@ acolhedora para ajudar a pessoa a organizar pensamentos e sentimentos.
 
 - **Backend** — FastAPI com resposta em streaming e uma camada de provedores de
   IA com *fallback* automático (`backend/`). A ordem padrão é
-  **Mistral → Gemini → Groq**: o primeiro provedor com chave configurada e
-  disponível responde; se ele falhar ao abrir o stream, o próximo assume.
+  **Mistral → Gemini → Groq → Cerebras**: o primeiro provedor com chave
+  configurada e disponível responde; se ele falhar ao abrir o stream, o próximo
+  assume. O provedor que respondeu é informado ao frontend pelo header
+  `X-LLM-Provider`.
 - **Frontend** — React 18 + Vite + TypeScript (`frontend/`). Chat com streaming,
-  sugestões de resposta dinâmicas e botão para interromper a geração.
+  sugestões de resposta dinâmicas, indicação do provedor em uso e botão para
+  interromper a geração.
 
 A persona e os guardrails de segurança são definidos **no servidor** e não podem
 ser sobrescritos pelo cliente.
+
+### Segurança e privacidade
+
+- **Persona e guardrails no servidor** — o cliente não consegue sobrescrevê-los.
+- **Guardrail de crise determinístico** — se a mensagem da pessoa contém sinais
+  de risco à própria vida, o backend garante a presença do contato do **CVV
+  (188)** na resposta, mesmo que o modelo não o inclua.
+- **Rate limiting por IP** e **limite de tamanho por mensagem** protegem contra
+  abuso e custo descontrolado (configuráveis — veja a tabela abaixo).
+- **Privacidade** — as mensagens são processadas por serviços de IA externos
+  (Mistral/Gemini/Groq/Cerebras). Não há persistência no servidor; o histórico
+  vive apenas na aba do navegador e some ao recarregar a página.
 
 ## Pré-requisitos
 
@@ -38,12 +53,15 @@ Variáveis disponíveis (veja `.env.example`):
 
 | Variável | Descrição | Padrão |
 | --- | --- | --- |
-| `LLM_PROVIDERS` | Ordem de fallback dos provedores | `mistral,gemini,groq` |
+| `LLM_PROVIDERS` | Ordem de fallback dos provedores | `mistral,gemini,groq,cerebras` |
 | `MISTRAL_API_KEY` / `MISTRAL_MODEL` | Chave e modelo da Mistral | — / `mistral-small-latest` |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | Chave e modelo do Gemini | — / `gemini-2.5-flash-lite` |
 | `GROQ_API_KEY` / `GROQ_MODEL` | Chave e modelo do Groq | — / `llama-3.3-70b-versatile` |
+| `CEREBRAS_API_KEY` / `CEREBRAS_MODEL` | Chave e modelo da Cerebras | — / `zai-glm-4.7` |
 | `ALLOWED_ORIGINS` | Origens permitidas no CORS (separadas por vírgula) | `http://localhost:5173` |
 | `MAX_HISTORY_MESSAGES` | Máximo de mensagens do histórico reenviadas ao modelo | `20` |
+| `MAX_MESSAGE_CHARS` | Tamanho máximo (caracteres) de uma mensagem | `4000` |
+| `CHAT_RATE_LIMIT` | Limite de requisições por IP no `/api/chat` (formato slowapi) | `30/minute` |
 
 > Mantenha o `.env.example` apenas com placeholders — chaves reais vão somente no
 > `.env` (que está no `.gitignore`).
@@ -71,6 +89,7 @@ pytest
 cd frontend
 npm install
 npm run dev                     # sobe em http://localhost:5173
+npm test                        # roda os testes (vitest)
 ```
 
 O Vite faz proxy de `/api` para o backend em `http://localhost:8000`.

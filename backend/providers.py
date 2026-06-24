@@ -136,6 +136,18 @@ class MistralProvider(_OpenAICompatProvider):
             max_tokens_param="max_tokens",
         )
 
+class CerebrasProvider(_OpenAICompatProvider):
+
+    def __init__(self, api_key: str, chat_model: str):
+        from openai import OpenAI
+
+        super().__init__(
+            name="cerebras",
+            client=OpenAI(api_key=api_key, base_url="https://api.cerebras.ai/v1"),
+            chat_model=chat_model,
+            max_tokens_param="max_completion_tokens",
+        )
+
 class ProviderRouter:
     def __init__(self, providers: list[LLMProvider]):
         if not providers:
@@ -149,9 +161,18 @@ class ProviderRouter:
     def names(self) -> list[str]:
         return [p.name for p in self.providers]
 
-    def stream_chat(
+    def open_stream(
         self, messages, system_instruction, temperature, max_output_tokens
-    ) -> Iterator[str]:
+    ) -> tuple[str | None, Iterator[str]]:
+        """Seleciona o primeiro provedor que consegue abrir o stream.
+
+        Retorna (nome_do_provedor, gerador). O gerador já inclui o primeiro
+        chunk e a resiliência a falhas no meio do stream. Forçar o primeiro
+        chunk aqui faz com que falhas de abertura (chave inválida, 429, etc.)
+        acionem o fallback ANTES de qualquer byte chegar ao cliente — e permite
+        ao chamador saber qual provedor respondeu (ex.: para um header HTTP).
+        Se todos falharem, retorna (None, gerador_com_mensagem_amigável).
+        """
         errors: list[str] = []
         for provider in self.providers:
             try:
@@ -160,31 +181,45 @@ class ProviderRouter:
                 )
                 first = next(stream)
             except StopIteration:
-                return
+                # Provedor abriu mas não produziu nada: sucesso vazio.
+                return provider.name, iter(())
             except Exception as exc:
                 logger.warning("Provedor '%s' falhou ao abrir o stream: %s", provider.name, exc)
                 errors.append(f"{provider.name}: {exc}")
                 continue
-
-            yield first
-            try:
-                for chunk in stream:
-                    yield chunk
-            except Exception as exc:
-                logger.warning("Provedor '%s' falhou no meio do stream: %s", provider.name, exc)
-                if "RESOURCE_EXHAUSTED" in str(exc) or "429" in str(exc):
-                    yield "\n\n⚠️ Limite de uso da IA atingido. Tente novamente em alguns instantes."
-                else:
-                    yield "\n\n⚠️ Tive um problema para gerar a resposta. Pode tentar de novo?"
-            return
+            return provider.name, self._continue(provider, first, stream)
 
         logger.error("Todos os provedores falharam no stream: %s", " | ".join(errors))
-        yield "\n\n⚠️ Nenhuma IA está disponível no momento. Tente novamente em alguns instantes."
+        return None, iter(
+            ("\n\n⚠️ Nenhuma IA está disponível no momento. Tente novamente em alguns instantes.",)
+        )
+
+    @staticmethod
+    def _continue(provider: LLMProvider, first: str, stream: Iterator[str]) -> Iterator[str]:
+        yield first
+        try:
+            for chunk in stream:
+                yield chunk
+        except Exception as exc:
+            logger.warning("Provedor '%s' falhou no meio do stream: %s", provider.name, exc)
+            if "RESOURCE_EXHAUSTED" in str(exc) or "429" in str(exc):
+                yield "\n\n⚠️ Limite de uso da IA atingido. Tente novamente em alguns instantes."
+            else:
+                yield "\n\n⚠️ Tive um problema para gerar a resposta. Pode tentar de novo?"
+
+    def stream_chat(
+        self, messages, system_instruction, temperature, max_output_tokens
+    ) -> Iterator[str]:
+        """Conveniência: streama a resposta descartando o nome do provedor."""
+        _, gen = self.open_stream(
+            messages, system_instruction, temperature, max_output_tokens
+        )
+        yield from gen
 
 def build_router_from_env() -> ProviderRouter:
     order = [
         p.strip().lower()
-        for p in os.getenv("LLM_PROVIDERS", "mistral,gemini,groq").split(",")
+        for p in os.getenv("LLM_PROVIDERS", "mistral,gemini,groq,cerebras").split(",")
         if p.strip()
     ]
 
@@ -197,6 +232,9 @@ def build_router_from_env() -> ProviderRouter:
     groq_key = os.getenv("GROQ_API_KEY") or os.getenv("GROK_API_KEY")
     groq_chat_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+    cerebras_key = os.getenv("CEREBRAS_API_KEY")
+    cerebras_chat_model = os.getenv("CEREBRAS_MODEL", "zai-glm-4.7")
+
     available: dict[str, LLMProvider] = {}
     if mistral_key:
         available["mistral"] = MistralProvider(mistral_key, mistral_chat_model)
@@ -204,6 +242,8 @@ def build_router_from_env() -> ProviderRouter:
         available["gemini"] = GeminiProvider(gemini_key, gemini_model)
     if groq_key:
         available["groq"] = GroqProvider(groq_key, groq_chat_model)
+    if cerebras_key:
+        available["cerebras"] = CerebrasProvider(cerebras_key, cerebras_chat_model)
 
     providers = [available[name] for name in order if name in available]
     providers += [p for name, p in available.items() if name not in order]
