@@ -15,6 +15,31 @@ const STARTERS: { label: string; text: string }[] = [
   { label: "Quero entender o que sinto", text: "Queria entender melhor o que estou sentindo..." },
 ];
 
+// Converte uma resposta HTTP de erro numa mensagem acolhedora para a pessoa.
+// O backend já manda textos prontos (ex.: o aviso de rate limit); para erros de
+// validação (corpo JSON) usamos uma mensagem própria em vez de expor o JSON.
+async function friendlyError(res: Response): Promise<string> {
+  if (res.status === 429) {
+    const body = await res.text().catch(() => "");
+    return (
+      body.trim() ||
+      "Muitas mensagens em pouco tempo. Respire fundo e tente de novo em instantes. 🌱"
+    );
+  }
+  if (res.status === 413) {
+    return "Sua mensagem ficou longa demais. Tente dividir em algo mais curto. 🌱";
+  }
+  if (res.status === 422) {
+    // Validação do servidor (mensagem muito longa, vazia, etc.). Mantemos um
+    // texto neutro porque o 422 cobre mais de uma causa.
+    return "Não consegui processar sua mensagem. Tente reformular ou encurtar um pouco. 🌱";
+  }
+  const body = await res.text().catch(() => "");
+  const contentType = res.headers.get("content-type") || "";
+  if (body.trim() && contentType.includes("text/plain")) return body.trim();
+  return `Algo deu errado por aqui (erro ${res.status}). Tente de novo em instantes.`;
+}
+
 export default function App() {
   const [items, setItems] = useState<Item[]>([]);
   const [input, setInput] = useState("");
@@ -63,6 +88,9 @@ export default function App() {
     abortRef.current = controller;
 
     let acc = "";
+    // Mensagem amigável vinda do servidor (ex.: 429/422). Quando preenchida,
+    // distingue um erro HTTP de uma falha de rede ("backend caiu").
+    let serverMessage: string | null = null;
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -70,7 +98,10 @@ export default function App() {
         body: JSON.stringify({ messages: baseItems }),
         signal: controller.signal,
       });
-      if (!res.ok || !res.body) throw new Error(`Erro ${res.status}`);
+      if (!res.ok || !res.body) {
+        serverMessage = await friendlyError(res);
+        throw new Error(serverMessage);
+      }
 
       const provider = res.headers.get("X-LLM-Provider") || undefined;
       const reader = res.body.getReader();
@@ -98,12 +129,12 @@ export default function App() {
         });
       } else {
         console.error(err);
+        const text =
+          serverMessage ??
+          "⚠️ Não consegui responder. Verifique se o backend está rodando.";
         setItems((prev) => {
           const next = [...prev];
-          next[next.length - 1] = {
-            role: "model",
-            text: "⚠️ Não consegui responder. Verifique se o backend está rodando.",
-          };
+          next[next.length - 1] = { role: "model", text };
           return next;
         });
       }

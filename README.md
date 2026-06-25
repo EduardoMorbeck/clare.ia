@@ -61,7 +61,10 @@ Variáveis disponíveis (veja `.env.example`):
 | `ALLOWED_ORIGINS` | Origens permitidas no CORS (separadas por vírgula) | `http://localhost:5173` |
 | `MAX_HISTORY_MESSAGES` | Máximo de mensagens do histórico reenviadas ao modelo | `20` |
 | `MAX_MESSAGE_CHARS` | Tamanho máximo (caracteres) de uma mensagem | `4000` |
+| `MAX_MESSAGES` | Máximo de mensagens aceitas no corpo da requisição | `100` |
+| `MAX_OUTPUT_TOKENS` | Teto de tokens de saída que o cliente pode pedir | `2048` |
 | `CHAT_RATE_LIMIT` | Limite de requisições por IP no `/api/chat` (formato slowapi) | `30/minute` |
+| `TRUST_PROXY_HEADERS` | Usa `X-Forwarded-For` no rate limit (ative só atrás de proxy de confiança) | `false` |
 
 > Mantenha o `.env.example` apenas com placeholders — chaves reais vão somente no
 > `.env` (que está no `.gitignore`).

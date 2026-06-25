@@ -1,4 +1,7 @@
-"""Testes do guardrail determinístico de crise (sem rede)."""
+"""Testes do guardrail de crise e da validação de entrada (sem rede)."""
+import pytest
+from pydantic import ValidationError
+
 import main
 
 
@@ -30,3 +33,24 @@ def test_nao_duplica_cvv_se_modelo_ja_mencionou():
 def test_anexa_nota_quando_nao_ha_marca_de_opcoes():
     out = main._ensure_support_note("Estou aqui com você.")
     assert out.endswith(main.SUPPORT_NOTE)
+
+
+def test_rejeita_max_output_tokens_acima_do_teto():
+    with pytest.raises(ValidationError):
+        main.ChatConfig(max_output_tokens=main.MAX_OUTPUT_TOKENS + 1)
+
+
+def test_rejeita_temperature_fora_da_faixa():
+    with pytest.raises(ValidationError):
+        main.ChatConfig(temperature=5.0)
+
+
+def test_rejeita_lista_de_mensagens_grande_demais():
+    msgs = [{"role": "user", "text": "oi"}] * (main.MAX_MESSAGES + 1)
+    with pytest.raises(ValidationError):
+        main.ChatRequest(messages=msgs)
+
+
+def test_rejeita_role_invalido():
+    with pytest.raises(ValidationError):
+        main.ChatRequest(messages=[{"role": "system", "text": "oi"}])
