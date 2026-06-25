@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parseReply } from "./parseReply";
@@ -49,6 +49,12 @@ export default function App() {
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+  // FLIP: posição vertical do input no render anterior + se a tela estava vazia.
+  // Ao sair da tela inicial (centralizado) para a conversa (rodapé), animamos o
+  // deslocamento em vez de deixá-lo saltar instantaneamente.
+  const prevComposerTop = useRef<number | null>(null);
+  const wasEmpty = useRef(true);
 
   function measureScroll() {
     const el = listRef.current;
@@ -61,6 +67,32 @@ export default function App() {
   useEffect(() => {
     measureScroll();
   }, [items, loading]);
+
+  const isEmpty = items.length === 0;
+
+  // Anima o input deslizando da posição central (tela inicial) para o rodapé
+  // assim que a primeira mensagem é enviada, usando a técnica FLIP.
+  useLayoutEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const newTop = el.getBoundingClientRect().top;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (wasEmpty.current && !isEmpty && prevComposerTop.current != null && !reduceMotion) {
+      const delta = prevComposerTop.current - newTop;
+      if (Math.abs(delta) > 1) {
+        el.style.transition = "none";
+        el.style.transform = `translateY(${delta}px)`;
+        // Força o reflow para que o transform inicial seja aplicado antes da transição.
+        void el.offsetHeight;
+        requestAnimationFrame(() => {
+          el.style.transition = "transform 0.45s cubic-bezier(0.22, 1, 0.36, 1)";
+          el.style.transform = "translateY(0)";
+        });
+      }
+    }
+    prevComposerTop.current = newTop;
+    wasEmpty.current = isEmpty;
+  });
 
   function scrollToBottom() {
     requestAnimationFrame(() => {
@@ -153,48 +185,84 @@ export default function App() {
     }
   }
 
-  return (
-    <div className="app">
-      <header className="header">
-        <span className="header-title">clare.ia</span>
-        <span className="header-note">
-          Ferramenta de reflexão — não substitui acompanhamento profissional. Suas
-          mensagens são processadas por serviços de IA externos; evite compartilhar
-          dados sensíveis.
-        </span>
-      </header>
-
-      <div className="messages" ref={listRef} onScroll={measureScroll}>
-        {items.length === 0 && (
-          <div className="empty">
-            <p className="empty-greeting">
-              Oi, eu sou o Clare.ia 🌱
-              <br />
-              Como você quer começar?
-            </p>
-            <div className="starters">
-              {STARTERS.map((s) => (
-                <button
-                  key={s.label}
-                  className="starter-chip"
-                  onClick={() => sendText(s.text)}
-                  disabled={loading}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            <p className="empty-hint">…ou escreva do seu jeito no campo abaixo</p>
-          </div>
+  const composer = (
+    <div className="composer-wrap" ref={composerRef}>
+      <div className="composer">
+        <textarea
+          ref={inputRef}
+          value={input}
+          onChange={(e) => {
+            setInput(e.target.value);
+            autoGrow();
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder="Digite sua mensagem..."
+          rows={1}
+        />
+        {loading ? (
+          <button className="send-btn" onClick={stop} aria-label="Parar resposta">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          </button>
+        ) : (
+          <button
+            className="send-btn"
+            onClick={sendMessage}
+            disabled={!input.trim()}
+            aria-label="Enviar"
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="12" y1="19" x2="12" y2="5" />
+              <polyline points="5 12 12 5 19 12" />
+            </svg>
+          </button>
         )}
+      </div>
+    </div>
+  );
 
-        {items.map((item, i) => {
+  return (
+    <div className={`app ${isEmpty ? "is-empty" : ""}`}>
+      {isEmpty ? (
+        <div className="hero">
+          <h1 className="hero-title">Oi, eu sou o Clare.ia 🌱</h1>
+          <p className="hero-desc">
+            Me conte como você está se sentindo ou pelo que está passando...
+          </p>
+          {composer}
+          <div className="starters">
+            {STARTERS.map((s) => (
+              <button
+                key={s.label}
+                className="starter-chip"
+                onClick={() => sendText(s.text)}
+                disabled={loading}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="messages" ref={listRef} onScroll={measureScroll}>
+            {items.map((item, i) => {
           const isLast = i === items.length - 1;
           const showOptions =
             item.role === "model" && isLast && !loading && !!item.options && item.options.length > 0;
           return (
             <Fragment key={i}>
-              <div className={`bubble ${item.role}`}>
+              <div className={`bubble ${item.role}${item.role === "user" ? " msg-animate-user" : ""}`}>
                 {item.role === "model" ? (
                   item.text ? (
                     <div className="msg-animate">
@@ -242,57 +310,21 @@ export default function App() {
             </Fragment>
           );
         })}
-      </div>
+          </div>
 
-      {canScroll && !atBottom && (
-        <button className="scroll-down" onClick={scrollToBottom} aria-label="Ir para o fim da conversa">
-          ↓
-        </button>
-      )}
-
-      <div className="composer-wrap">
-        <div className="composer">
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              autoGrow();
-            }}
-            onKeyDown={handleKeyDown}
-            placeholder="Digite sua mensagem..."
-            rows={1}
-          />
-          {loading ? (
-            <button className="send-btn" onClick={stop} aria-label="Parar resposta">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <rect x="6" y="6" width="12" height="12" rx="2" />
-              </svg>
-            </button>
-          ) : (
-            <button
-              className="send-btn"
-              onClick={sendMessage}
-              disabled={!input.trim()}
-              aria-label="Enviar"
-            >
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
+          {canScroll && !atBottom && (
+            <button className="scroll-down" onClick={scrollToBottom} aria-label="Ir para o fim da conversa">
+              ↓
             </button>
           )}
-        </div>
-      </div>
+
+          {composer}
+        </>
+      )}
+
+      <p className="disclaimer">
+        Ferramenta de reflexão — não substitui acompanhamento profissional
+      </p>
     </div>
   );
 }
