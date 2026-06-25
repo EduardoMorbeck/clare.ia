@@ -54,10 +54,10 @@ Variáveis disponíveis (veja `.env.example`):
 
 | Variável | Descrição | Padrão |
 | --- | --- | --- |
-| `LLM_PROVIDERS` | Ordem de fallback dos provedores | `gemini,groq,mistral,cerebras` |
+| `LLM_PROVIDERS` | Ordem de fallback dos provedores | `gemini,cerebras,groq,mistral` |
 | `MISTRAL_API_KEY` / `MISTRAL_MODEL` | Chave e modelo da Mistral | — / `mistral-small-latest` |
-| `GEMINI_API_KEY` / `GEMINI_MODEL` | Chave e modelo do Gemini | — / `gemini-2.5-flash-lite` |
-| `GROQ_API_KEY` / `GROQ_MODEL` | Chave e modelo do Groq | — / `llama-3.1-8b-instant` |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Chave e modelo do Gemini | — / `gemini-2.5-flash` |
+| `GROQ_API_KEY` / `GROQ_MODEL` | Chave e modelo do Groq | — / `openai/gpt-oss-20b` |
 | `CEREBRAS_API_KEY` / `CEREBRAS_MODEL` | Chave e modelo da Cerebras | — / `zai-glm-4.7` |
 | `ALLOWED_ORIGINS` | Origens permitidas no CORS (separadas por vírgula) | `http://localhost:5173` |
 | `MAX_HISTORY_MESSAGES` | Máximo de mensagens do histórico reenviadas ao modelo | `20` |

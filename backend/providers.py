@@ -181,7 +181,7 @@ class ProviderRouter:
 def build_router_from_env() -> ProviderRouter:
     order = [
         p.strip().lower()
-        for p in os.getenv("LLM_PROVIDERS", "gemini,groq,mistral,cerebras").split(",")
+        for p in os.getenv("LLM_PROVIDERS", "gemini,cerebras,groq,mistral").split(",")
         if p.strip()
     ]
 
@@ -189,10 +189,10 @@ def build_router_from_env() -> ProviderRouter:
     mistral_chat_model = os.getenv("MISTRAL_MODEL", "mistral-small-latest")
 
     gemini_key = os.getenv("GEMINI_API_KEY")
-    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+    gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
     groq_key = os.getenv("GROQ_API_KEY") or os.getenv("GROK_API_KEY")
-    groq_chat_model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+    groq_chat_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
     cerebras_key = os.getenv("CEREBRAS_API_KEY")
     cerebras_chat_model = os.getenv("CEREBRAS_MODEL", "zai-glm-4.7")
