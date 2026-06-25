@@ -11,7 +11,7 @@ acolhedora para ajudar a pessoa a organizar pensamentos e sentimentos.
 
 - **Backend** — FastAPI com resposta em streaming e uma camada de provedores de
   IA com *fallback* automático (`backend/`). A ordem padrão é
-  **Mistral → Gemini → Groq → Cerebras**: o primeiro provedor com chave
+  **Gemini → Groq → Mistral → Cerebras**: o primeiro provedor com chave
   configurada e disponível responde; se ele falhar ao abrir o stream, o próximo
   assume. O provedor que respondeu é informado ao frontend pelo header
   `X-LLM-Provider`.
@@ -53,10 +53,10 @@ Variáveis disponíveis (veja `.env.example`):
 
 | Variável | Descrição | Padrão |
 | --- | --- | --- |
-| `LLM_PROVIDERS` | Ordem de fallback dos provedores | `mistral,gemini,groq,cerebras` |
+| `LLM_PROVIDERS` | Ordem de fallback dos provedores | `gemini,groq,mistral,cerebras` |
 | `MISTRAL_API_KEY` / `MISTRAL_MODEL` | Chave e modelo da Mistral | — / `mistral-small-latest` |
 | `GEMINI_API_KEY` / `GEMINI_MODEL` | Chave e modelo do Gemini | — / `gemini-2.5-flash-lite` |
-| `GROQ_API_KEY` / `GROQ_MODEL` | Chave e modelo do Groq | — / `llama-3.3-70b-versatile` |
+| `GROQ_API_KEY` / `GROQ_MODEL` | Chave e modelo do Groq | — / `llama-3.1-8b-instant` |
 | `CEREBRAS_API_KEY` / `CEREBRAS_MODEL` | Chave e modelo da Cerebras | — / `zai-glm-4.7` |
 | `ALLOWED_ORIGINS` | Origens permitidas no CORS (separadas por vírgula) | `http://localhost:5173` |
 | `MAX_HISTORY_MESSAGES` | Máximo de mensagens do histórico reenviadas ao modelo | `20` |
