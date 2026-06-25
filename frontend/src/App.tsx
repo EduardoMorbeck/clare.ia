@@ -4,7 +4,15 @@ import remarkGfm from "remark-gfm";
 import { parseReply } from "./parseReply";
 import "./App.css";
 
-type Item = { role: "user" | "model"; text: string; options?: string[]; provider?: string };
+type Item = {
+  role: "user" | "model";
+  text: string;
+  options?: string[];
+  provider?: string;
+  // Resposta de fallback (IA indisponível, JSON inválido, falha de rede): a UI
+  // oferece um botão de "tentar de novo" em vez de tratá-la como fala da persona.
+  error?: boolean;
+};
 
 const STARTERS: { label: string; text: string }[] = [
   { label: "Não sei explicar", text: "Não sei explicar direito o que estou sentindo..." },
@@ -108,10 +116,12 @@ export default function App() {
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
   }
 
-  async function sendText(text: string) {
-    if (!text || loading) return;
+  // Faz a requisição ao backend a partir de uma conversa que termina numa
+  // mensagem da pessoa. Centraliza o fluxo usado tanto pelo envio normal quanto
+  // pelo "tentar de novo" — neste último, baseItems não ganha uma nova mensagem.
+  async function requestReply(baseItems: Item[]) {
+    if (loading) return;
 
-    const baseItems: Item[] = [...items, { role: "user", text }];
     setItems([...baseItems, { role: "model", text: "" }]);
     setLoading(true);
     scrollToBottom();
@@ -135,10 +145,10 @@ export default function App() {
       }
 
       const provider = res.headers.get("X-LLM-Provider") || undefined;
-      const { text: msg, options } = parseReply(await res.json());
+      const { text: msg, options, error } = parseReply(await res.json());
       setItems((prev) => {
         const next = [...prev];
-        next[next.length - 1] = { role: "model", text: msg, options, provider };
+        next[next.length - 1] = { role: "model", text: msg, options, provider, error };
         return next;
       });
       // Acompanha a resposta + opções recém-renderizadas, deslizando suavemente
@@ -156,7 +166,7 @@ export default function App() {
           "⚠️ Não consegui responder. Verifique se o backend está rodando.";
         setItems((prev) => {
           const next = [...prev];
-          next[next.length - 1] = { role: "model", text };
+          next[next.length - 1] = { role: "model", text, error: true };
           return next;
         });
       }
@@ -164,6 +174,18 @@ export default function App() {
       abortRef.current = null;
       setLoading(false);
     }
+  }
+
+  function sendText(text: string) {
+    if (!text || loading) return;
+    requestReply([...items, { role: "user", text }]);
+  }
+
+  // Refaz a última requisição: descarta a bolha de erro do fim e reenvia a
+  // conversa até a última mensagem da pessoa, sem quebrar o fluxo.
+  function retry() {
+    if (loading || items.length === 0) return;
+    requestReply(items.slice(0, -1));
   }
 
   function stop() {
@@ -297,7 +319,28 @@ export default function App() {
                   ))}
                 </div>
               )}
-              {item.role === "model" && item.text && item.provider && item.provider !== "none" && (
+              {item.role === "model" && item.error && isLast && !loading && (
+                <div className="reply-options">
+                  <button className="starter-chip opt-animate retry-chip" onClick={retry}>
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <polyline points="23 4 23 10 17 10" />
+                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                    </svg>
+                    Tentar de novo
+                  </button>
+                </div>
+              )}
+              {item.role === "model" && item.text && !item.error && item.provider && item.provider !== "none" && (
                 <span
                   className="provider-tag fade-in"
                   style={{

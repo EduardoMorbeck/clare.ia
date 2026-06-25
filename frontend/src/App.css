@@ -223,6 +223,17 @@
   cursor: not-allowed;
 }
 
+/* Botão de "tentar de novo" exibido sob uma resposta de fallback. */
+.retry-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.retry-chip svg {
+  flex-shrink: 0;
+}
+
 .bubble {
   max-width: 80%;
   min-width: 0;

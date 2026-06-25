@@ -1,9 +1,9 @@
-export type Reply = { text: string; options: string[] };
+export type Reply = { text: string; options: string[]; error: boolean };
 
 /**
- * Normaliza a resposta JSON do backend (`{ message, options }`) para o formato
- * que a UI consome. É tolerante: campos ausentes ou com tipo inesperado viram
- * valores vazios em vez de quebrar a renderização.
+ * Normaliza a resposta JSON do backend (`{ message, options, error }`) para o
+ * formato que a UI consome. É tolerante: campos ausentes ou com tipo inesperado
+ * viram valores vazios em vez de quebrar a renderização.
  */
 export function parseReply(data: unknown): Reply {
   const obj = (data ?? {}) as Record<string, unknown>;
@@ -14,5 +14,5 @@ export function parseReply(data: unknown): Reply {
         .filter(Boolean)
         .slice(0, 4)
     : [];
-  return { text, options };
+  return { text, options, error: obj.error === true };
 }

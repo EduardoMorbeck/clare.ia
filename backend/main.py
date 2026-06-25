@@ -250,9 +250,17 @@ def _parse_reply(raw: str) -> tuple[str, list[str]]:
     return message, options
 
 
-def _reply(message: str, options: list[str], provider: str | None) -> JSONResponse:
+def _reply(
+    message: str,
+    options: list[str],
+    provider: str | None,
+    error: bool = False,
+) -> JSONResponse:
+    # error=True sinaliza para o cliente que esta é uma resposta de fallback
+    # (nenhuma IA disponível, JSON inválido, etc.), e não uma fala real da
+    # persona — assim a UI pode oferecer um botão de "tentar de novo".
     return JSONResponse(
-        {"message": message, "options": options},
+        {"message": message, "options": options, "error": error},
         headers={"X-LLM-Provider": provider or "none"},
     )
 
@@ -300,6 +308,7 @@ def chat(request: Request, req: ChatRequest):
             "⚠️ Nenhuma IA está disponível no momento. Tente novamente em alguns instantes.",
             [],
             None,
+            error=True,
         )
 
     try:
@@ -313,6 +322,7 @@ def chat(request: Request, req: ChatRequest):
             "⚠️ Tive um problema para organizar a resposta. Pode tentar de novo?",
             [],
             provider_name,
+            error=True,
         )
 
     if risk:

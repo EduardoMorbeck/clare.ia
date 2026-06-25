@@ -29,4 +29,10 @@ describe("parseReply", () => {
     expect(r.text).toBe("");
     expect(r.options).toEqual([]);
   });
+
+  it("lê o flag de erro do backend (e assume false por padrão)", () => {
+    expect(parseReply({ message: "x", error: true }).error).toBe(true);
+    expect(parseReply({ message: "x" }).error).toBe(false);
+    expect(parseReply({ message: "x", error: "sim" }).error).toBe(false);
+  });
 });
