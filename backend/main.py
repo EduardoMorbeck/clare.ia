@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -6,7 +8,7 @@ from typing import Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -16,6 +18,8 @@ from starlette.responses import PlainTextResponse
 from providers import build_router_from_env
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+logger = logging.getLogger("clare.main")
 
 ROUTER = build_router_from_env()
 
@@ -97,6 +101,16 @@ PERSONA = (
     "o nome de quem fala com você — então NUNCA a chame por um nome (não invente "
     "nenhum e jamais use 'Clare'/'Clare.ia' para se dirigir a ela). Trate-a de forma "
     "neutra, por 'você'. "
+    "Você também NÃO sabe o gênero nem a orientação sexual da pessoa — JAMAIS os "
+    "presuma. Use SEMPRE linguagem neutra: quando um adjetivo ou particípio "
+    "revelaria gênero (ex.: 'cansado/cansada', 'sozinho/sozinha'), prefira uma "
+    "construção neutra (ex.: 'sentindo cansaço', 'em solidão') ou, se não houver "
+    "alternativa, a grafia com '(a)' (ex.: 'sozinho(a)'). O MESMO vale para "
+    "qualquer pessoa que ela mencione (um par, alguém de quem gosta, etc.): não "
+    "presuma o gênero dessa pessoa — use termos neutros como 'essa pessoa', "
+    "'seu par' ou 'alguém' até que ela própria deixe o gênero ou a orientação "
+    "explícitos na conversa. Só passe a usar gênero/pronomes quando a pessoa os "
+    "revelar diretamente. "
     "Você NÃO é um profissional de saúde e NÃO faz diagnósticos. Evite linguagem "
     "clínica definitiva (ex.: 'você tem transtorno X'). Prefira uma fala empática "
     "e exploratória. Quando fizer sentido, sugira com leveza e sem impor pequenas "
@@ -111,29 +125,33 @@ PERSONA = (
     "apoio (no Brasil, o CVV pelo telefone 188)."
 )
 
-OPCOES = (
-    "\n\nTODA mensagem sua DEVE terminar com de 2 a 4 sugestões curtas de resposta "
-    "para a pessoa. Coloque-as na ÚLTIMA linha da mensagem, exatamente neste formato "
-    "e sem nada depois:\n"
-    "[[OPCOES]] sugestão 1 | sugestão 2 | sugestão 3\n"
-    "Regras das opções:\n"
-    "- A linha [[OPCOES]] é obrigatória em toda resposta sua, sem exceção. Use-a no "
-    "máximo uma vez por mensagem e sempre como última linha.\n"
-    "- Quando você fizer uma pergunta, cada sugestão precisa RESPONDER DIRETAMENTE à "
-    "pergunta exata que você acabou de fazer. Se a pergunta é 'o que mais pesa "
-    "nisso?', as opções são respostas possíveis a isso (ex.: 'O medo de errar', 'A "
-    "reação dos outros') — nunca reações genéricas como 'Acho que sim' ou 'Mais ou "
-    "menos'.\n"
-    "- Quando você NÃO fizer uma pergunta (só acolheu, validou ou comentou), as "
-    "sugestões são formas naturais de a pessoa continuar a conversa a partir dali "
-    "(ex.: 'Quero falar mais sobre isso', 'Mudou um pouco como me sinto', 'Prefiro "
-    "deixar pra lá por agora').\n"
-    "- As sugestões devem ser relevantes ao que a PESSOA acabou de contar e à "
+REPLY_FORMAT = (
+    "\n\nFORMATO DA RESPOSTA: responda SEMPRE com um único objeto JSON válido e "
+    "nada mais — sem texto antes ou depois e sem cercas de código (```). O objeto "
+    "tem exatamente duas chaves:\n"
+    '- "message": string com a sua resposta para a pessoa (pode usar markdown leve).\n'
+    '- "options": lista (array) com de 2 a 4 sugestões curtas de resposta para a pessoa.\n'
+    'Regras do array "options":\n'
+    "- Tenha sempre de 2 a 4 itens; nunca o deixe vazio.\n"
+    "- Quando a sua \"message\" fizer uma pergunta, cada opção precisa RESPONDER "
+    "DIRETAMENTE à pergunta exata que você acabou de fazer. Se a pergunta é 'o que "
+    "mais pesa nisso?', as opções são respostas possíveis a isso (ex.: 'O medo de "
+    "errar', 'A reação dos outros') — nunca reações genéricas como 'Acho que sim' "
+    "ou 'Mais ou menos'.\n"
+    "- Quando a sua \"message\" NÃO fizer uma pergunta (só acolheu, validou ou "
+    "comentou), as opções são formas naturais de a pessoa continuar a conversa a "
+    "partir dali (ex.: 'Quero falar mais sobre isso', 'Mudou um pouco como me "
+    "sinto', 'Prefiro deixar pra lá por agora').\n"
+    "- As opções devem ser relevantes ao que a PESSOA acabou de contar e à "
     "reflexão que você está propondo: use o contexto e as palavras dela para que "
     "cada opção soe como algo que ela realmente diria naquele momento.\n"
     "- Escreva-as na voz da PESSOA (primeira pessoa), curtas (poucas palavras) e "
     "distintas entre si, cobrindo caminhos plausíveis e diferentes.\n"
-    "- As sugestões são um convite: a pessoa pode ignorá-las e escrever livremente."
+    "- Como são escritas em 1ª pessoa, siga a regra de neutralidade de gênero: "
+    "evite adjetivos/particípios marcados (use formas neutras ou '(a)') e não "
+    "presuma o gênero de ninguém que apareça na frase enquanto isso não for "
+    "explícito.\n"
+    "- As opções são um convite: a pessoa pode ignorá-las e escrever livremente."
 )
 
 # Sinais de risco à própria vida na ÚLTIMA mensagem da pessoa. Lista deliberadamente
@@ -153,16 +171,47 @@ SUPPORT_NOTE = (
     "**188** ou em cvv.org.br. Se houver risco imediato, ligue **192** (SAMU)."
 )
 
-MARK = "[[OPCOES]]"
+def _ensure_support_note(message: str) -> str:
+    """Garante o contato do CVV no texto da resposta se ele ainda não aparecer."""
+    if "188" in message:
+        return message
+    return message.rstrip() + SUPPORT_NOTE
 
-def _ensure_support_note(full: str) -> str:
-    """Insere a nota do CVV antes da linha [[OPCOES]] se ela ainda não aparecer."""
-    if "188" in full:
-        return full
-    idx = full.find(MARK)
-    if idx >= 0:
-        return full[:idx].rstrip() + SUPPORT_NOTE + "\n\n" + full[idx:]
-    return full.rstrip() + SUPPORT_NOTE
+
+def _parse_reply(raw: str) -> tuple[str, list[str]]:
+    """Valida e extrai (message, options) do JSON cru devolvido pelo provedor.
+
+    Levanta ValueError (inclui json.JSONDecodeError) se o texto não for um JSON
+    utilizável — ex.: truncado por limite de tokens, ou sem o campo 'message'.
+    """
+    text = raw.strip()
+    # Alguns modelos embrulham o JSON em cercas de código apesar da instrução.
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text).strip()
+
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("resposta JSON não é um objeto")
+
+    message = str(data.get("message", "")).strip()
+    if not message:
+        raise ValueError("resposta sem o campo 'message'")
+
+    raw_options = data.get("options", [])
+    options = (
+        [str(o).strip() for o in raw_options if str(o).strip()][:4]
+        if isinstance(raw_options, list)
+        else []
+    )
+    return message, options
+
+
+def _reply(message: str, options: list[str], provider: str | None) -> JSONResponse:
+    return JSONResponse(
+        {"message": message, "options": options},
+        headers={"X-LLM-Provider": provider or "none"},
+    )
 
 class Message(BaseModel):
     role: Literal["user", "model"]
@@ -186,7 +235,7 @@ def chat(request: Request, req: ChatRequest):
     cfg = req.config or ChatConfig()
     # A persona (e seus guardrails de segurança) é sempre definida no servidor —
     # o cliente nunca pode sobrescrevê-la.
-    system_instruction = PERSONA + OPCOES
+    system_instruction = PERSONA + REPLY_FORMAT
     messages = req.messages[-MAX_HISTORY_MESSAGES:]
 
     # max_output_tokens=None significaria "sem limite" no provedor — então um
@@ -196,27 +245,39 @@ def chat(request: Request, req: ChatRequest):
     last_user = next((m.text for m in reversed(messages) if m.role == "user"), "")
     risk = bool(RISK_PATTERNS.search(last_user))
 
-    provider_name, gen = ROUTER.open_stream(
+    provider_name, raw = ROUTER.generate_json(
         messages,
         system_instruction,
         cfg.temperature,
         max_output_tokens,
     )
 
-    def generate():
-        if risk:
-            # Em situação de risco, garantimos a presença do CVV. Bufferizamos a
-            # resposta (caso raro) para inserir a nota na posição correta, antes
-            # das opções de resposta — vale abrir mão do streaming pela segurança.
-            yield _ensure_support_note("".join(gen))
-        else:
-            yield from gen
+    if raw is None:
+        return _reply(
+            "⚠️ Nenhuma IA está disponível no momento. Tente novamente em alguns instantes.",
+            [],
+            None,
+        )
 
-    return StreamingResponse(
-        generate(),
-        media_type="text/plain; charset=utf-8",
-        headers={"X-LLM-Provider": provider_name or "none"},
-    )
+    try:
+        message, options = _parse_reply(raw)
+    except ValueError as exc:
+        # JSON inválido normalmente significa resposta truncada pelo limite de
+        # tokens. Não adianta cair para outro provedor (mesmo teto) — pedimos
+        # para a pessoa tentar de novo.
+        logger.warning("Resposta de '%s' não é JSON utilizável: %s", provider_name, exc)
+        return _reply(
+            "⚠️ Tive um problema para organizar a resposta. Pode tentar de novo?",
+            [],
+            provider_name,
+        )
+
+    if risk:
+        # Em situação de risco, garantimos (de forma determinística) a presença
+        # do contato do CVV no texto da resposta.
+        message = _ensure_support_note(message)
+
+    return _reply(message, options, provider_name)
 
 if __name__ == "__main__":
     import uvicorn

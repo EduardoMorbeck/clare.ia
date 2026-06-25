@@ -9,15 +9,16 @@ acolhedora para ajudar a pessoa a organizar pensamentos e sentimentos.
 
 ## Arquitetura
 
-- **Backend** — FastAPI com resposta em streaming e uma camada de provedores de
-  IA com *fallback* automático (`backend/`). A ordem padrão é
-  **Gemini → Groq → Mistral → Cerebras**: o primeiro provedor com chave
-  configurada e disponível responde; se ele falhar ao abrir o stream, o próximo
-  assume. O provedor que respondeu é informado ao frontend pelo header
-  `X-LLM-Provider`.
-- **Frontend** — React 18 + Vite + TypeScript (`frontend/`). Chat com streaming,
-  sugestões de resposta dinâmicas, indicação do provedor em uso e botão para
-  interromper a geração.
+- **Backend** — FastAPI com resposta em **JSON estruturado** (`{ message,
+  options }`) e uma camada de provedores de IA com *fallback* automático
+  (`backend/`). A ordem padrão é **Gemini → Groq → Mistral → Cerebras**: o
+  primeiro provedor com chave configurada e disponível responde; se ele falhar,
+  o próximo assume. Cada provedor é acionado em modo JSON nativo
+  (`response_mime_type` no Gemini, `response_format` nos demais). O provedor que
+  respondeu é informado ao frontend pelo header `X-LLM-Provider`.
+- **Frontend** — React 18 + Vite + TypeScript (`frontend/`). Chat com sugestões
+  de resposta dinâmicas (vindas do campo `options`), indicação do provedor em
+  uso e botão para interromper a requisição.
 
 A persona e os guardrails de segurança são definidos **no servidor** e não podem
 ser sobrescritos pelo cliente.

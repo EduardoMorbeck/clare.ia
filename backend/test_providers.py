@@ -5,59 +5,45 @@ import pytest
 
 
 class _FakeProvider(LLMProvider):
-    def __init__(self, name, chunks=None, fail_on_open=False, fail_mid=False):
+    def __init__(self, name, raw=None, fail=False):
         self.name = name
-        self._chunks = chunks or []
-        self._fail_on_open = fail_on_open
-        self._fail_mid = fail_mid
+        self._raw = raw
+        self._fail = fail
 
-    def stream_chat(self, messages, system_instruction, temperature, max_output_tokens):
-        if self._fail_on_open:
-            raise RuntimeError(f"{self.name} caiu ao abrir")
-        for i, chunk in enumerate(self._chunks):
-            if self._fail_mid and i == 1:
-                raise RuntimeError(f"{self.name} caiu no meio")
-            yield chunk
-
-
-def _run(router):
-    return "".join(router.stream_chat([], "sys", 0.7, 256))
+    def generate_json(self, messages, system_instruction, temperature, max_output_tokens):
+        if self._fail:
+            raise RuntimeError(f"{self.name} caiu")
+        return self._raw
 
 
 def test_usa_primeiro_provedor_disponivel():
     router = ProviderRouter([
-        _FakeProvider("a", ["Olá", " mundo"]),
-        _FakeProvider("b", ["não", " deveria"]),
+        _FakeProvider("a", '{"message": "olá"}'),
+        _FakeProvider("b", '{"message": "não deveria"}'),
     ])
-    assert _run(router) == "Olá mundo"
+    name, raw = router.generate_json([], "sys", 0.7, 256)
+    assert name == "a"
+    assert raw == '{"message": "olá"}'
 
 
-def test_fallback_quando_primeiro_falha_ao_abrir():
+def test_fallback_quando_primeiro_falha():
     router = ProviderRouter([
-        _FakeProvider("a", fail_on_open=True),
-        _FakeProvider("b", ["resposta", " do b"]),
+        _FakeProvider("a", fail=True),
+        _FakeProvider("b", '{"message": "resposta do b"}'),
     ])
-    assert _run(router) == "resposta do b"
+    name, raw = router.generate_json([], "sys", 0.7, 256)
+    assert name == "b"
+    assert raw == '{"message": "resposta do b"}'
 
 
-def test_falha_no_meio_nao_troca_de_provedor_e_avisa():
+def test_todos_falham_retorna_none():
     router = ProviderRouter([
-        _FakeProvider("a", ["começo", "X", "fim"], fail_mid=True),
-        _FakeProvider("b", ["nunca usado"]),
+        _FakeProvider("a", fail=True),
+        _FakeProvider("b", fail=True),
     ])
-    out = _run(router)
-    assert out.startswith("começo")
-    assert "nunca usado" not in out
-    assert "⚠️" in out
-
-
-def test_todos_falham_retorna_mensagem_amigavel():
-    router = ProviderRouter([
-        _FakeProvider("a", fail_on_open=True),
-        _FakeProvider("b", fail_on_open=True),
-    ])
-    out = _run(router)
-    assert "⚠️" in out
+    name, raw = router.generate_json([], "sys", 0.7, 256)
+    assert name is None
+    assert raw is None
 
 
 def test_router_vazio_levanta_erro():

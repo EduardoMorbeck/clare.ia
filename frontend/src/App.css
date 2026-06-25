@@ -87,6 +87,100 @@
   letter-spacing: 0.02em;
 }
 
+/* A resposta da IA entra suavemente, deslizando da esquerda para a direita. As
+   opções surgem logo depois, uma a uma (stagger via animation-delay inline). */
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.msg-animate {
+  animation: slide-in 0.3s ease-out both;
+}
+
+/* Mantém o reset de margens do markdown agora que ele vive dentro do wrapper. */
+.msg-animate > :first-child {
+  margin-top: 0;
+}
+
+.msg-animate > :last-child {
+  margin-bottom: 0;
+}
+
+.opt-animate {
+  animation: slide-in 0.3s ease-out both;
+}
+
+.fade-in {
+  animation: fade-in 0.3s ease-out both;
+}
+
+/* Indicador de "digitando": três pontinhos que pulsam em sequência enquanto a
+   resposta da IA não chega (estilo Gemini/DeepSeek). */
+.typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 2px;
+}
+
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #8b93a3;
+  animation: typing-bounce 1.3s ease-in-out infinite both;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes typing-bounce {
+  0%,
+  70%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  35% {
+    transform: translateY(-5px);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg-animate,
+  .opt-animate,
+  .fade-in {
+    animation: none;
+  }
+  /* Sem o salto dos pontos, mas mantendo-os visíveis como indicador estático. */
+  .typing-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
 .reply-options {
   align-self: flex-start;
   display: flex;

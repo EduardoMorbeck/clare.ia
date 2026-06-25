@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { parseOptions } from "./parseOptions";
+import { parseReply } from "./parseReply";
 import "./App.css";
 
 type Item = { role: "user" | "model"; text: string; options?: string[]; provider?: string };
@@ -87,7 +87,6 @@ export default function App() {
     const controller = new AbortController();
     abortRef.current = controller;
 
-    let acc = "";
     // Mensagem amigável vinda do servidor (ex.: 429/422). Quando preenchida,
     // distingue um erro HTTP de uma falha de rede ("backend caiu").
     let serverMessage: string | null = null;
@@ -98,35 +97,26 @@ export default function App() {
         body: JSON.stringify({ messages: baseItems }),
         signal: controller.signal,
       });
-      if (!res.ok || !res.body) {
+      if (!res.ok) {
         serverMessage = await friendlyError(res);
         throw new Error(serverMessage);
       }
 
       const provider = res.headers.get("X-LLM-Provider") || undefined;
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        acc += decoder.decode(value, { stream: true });
-        const { text: msg, options } = parseOptions(acc);
-        setItems((prev) => {
-          const next = [...prev];
-          next[next.length - 1] = { role: "model", text: msg, options, provider };
-          return next;
-        });
-      }
+      const { text: msg, options } = parseReply(await res.json());
+      setItems((prev) => {
+        const next = [...prev];
+        next[next.length - 1] = { role: "model", text: msg, options, provider };
+        return next;
+      });
+      // Acompanha a resposta + opções recém-renderizadas, deslizando suavemente
+      // até o fim da conversa.
+      scrollToBottom();
     } catch (err) {
       if ((err as Error)?.name === "AbortError") {
-        // Interrompido pela pessoa: preserva o texto parcial já recebido.
-        const { text: msg, options } = parseOptions(acc);
-        setItems((prev) => {
-          const next = [...prev];
-          const provider = next[next.length - 1]?.provider;
-          next[next.length - 1] = { role: "model", text: msg, options, provider };
-          return next;
-        });
+        // Interrompido pela pessoa antes da resposta chegar: remove a bolha
+        // vazia do assistente (não há texto parcial sem streaming).
+        setItems((prev) => prev.slice(0, -1));
       } else {
         console.error(err);
         const text =
@@ -207,25 +197,47 @@ export default function App() {
               <div className={`bubble ${item.role}`}>
                 {item.role === "model" ? (
                   item.text ? (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+                    <div className="msg-animate">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{item.text}</ReactMarkdown>
+                    </div>
                   ) : (
-                    loading && isLast && "…"
+                    loading &&
+                    isLast && (
+                      <span className="typing" aria-label="Clare.ia está digitando" role="status">
+                        <span className="typing-dot" />
+                        <span className="typing-dot" />
+                        <span className="typing-dot" />
+                      </span>
+                    )
                   )
                 ) : (
                   item.text
                 )}
               </div>
-              {item.role === "model" && item.text && item.provider && item.provider !== "none" && (
-                <span className="provider-tag">via {item.provider}</span>
-              )}
               {showOptions && (
                 <div className="reply-options">
                   {item.options!.map((opt, k) => (
-                    <button key={k} className="starter-chip" onClick={() => sendText(opt)} disabled={loading}>
+                    <button
+                      key={k}
+                      className="starter-chip opt-animate"
+                      style={{ animationDelay: `${0.4 + k * 0.1}s` }}
+                      onClick={() => sendText(opt)}
+                      disabled={loading}
+                    >
                       {opt}
                     </button>
                   ))}
                 </div>
+              )}
+              {item.role === "model" && item.text && item.provider && item.provider !== "none" && (
+                <span
+                  className="provider-tag fade-in"
+                  style={{
+                    animationDelay: `${0.4 + (item.options?.length ?? 0) * 0.1}s`,
+                  }}
+                >
+                  via {item.provider}
+                </span>
               )}
             </Fragment>
           );

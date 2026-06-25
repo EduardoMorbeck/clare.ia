@@ -1,7 +1,6 @@
 from __future__ import annotations
 import logging
 import os
-from collections.abc import Iterator
 from typing import Protocol
 
 logger = logging.getLogger("clare.providers")
@@ -16,13 +15,19 @@ class ProviderError(Exception):
 class LLMProvider:
     name: str = "base"
 
-    def stream_chat(
+    def generate_json(
         self,
         messages: list[_Msg],
         system_instruction: str,
         temperature: float | None,
         max_output_tokens: int | None,
-    ) -> Iterator[str]:
+    ) -> str:
+        """Gera uma resposta completa (não-stream) como texto JSON cru.
+
+        O texto retornado AINDA não é validado aqui — quem chama (o handler) é
+        responsável por fazer o parse/validação do JSON. Levantar qualquer
+        exceção sinaliza ao router para tentar o próximo provedor.
+        """
         raise NotImplementedError
 
 class GeminiProvider(LLMProvider):
@@ -39,29 +44,24 @@ class GeminiProvider(LLMProvider):
     def _to_contents(messages: list[_Msg]) -> list[dict]:
         return [{"role": m.role, "parts": [{"text": m.text}]} for m in messages]
 
-    def stream_chat(self, messages, system_instruction, temperature, max_output_tokens):
+    def generate_json(self, messages, system_instruction, temperature, max_output_tokens):
         from google.genai import types
 
         config = types.GenerateContentConfig(
             temperature=temperature,
             system_instruction=system_instruction,
             max_output_tokens=max_output_tokens,
+            # Força saída sintaticamente válida em JSON; a forma do objeto vem da
+            # instrução de sistema (campos "message" e "options").
+            response_mime_type="application/json",
             thinking_config=types.ThinkingConfig(thinking_budget=0),
         )
-        stream = self.client.models.generate_content_stream(
+        resp = self.client.models.generate_content(
             model=self.model,
             contents=self._to_contents(messages),
             config=config,
         )
-        truncated = False
-        for chunk in stream:
-            if chunk.text:
-                yield chunk.text
-            cand = (chunk.candidates or [None])[0]
-            if cand and cand.finish_reason and str(cand.finish_reason).endswith("MAX_TOKENS"):
-                truncated = True
-        if truncated:
-            yield "\n\n_(resposta interrompida por limite de tamanho)_"
+        return resp.text or ""
 
 class _OpenAICompatProvider(LLMProvider):
     def __init__(
@@ -91,27 +91,19 @@ class _OpenAICompatProvider(LLMProvider):
             kwargs["extra_headers"] = self._extra_headers
         return self.client.chat.completions.create(**kwargs)
 
-    def stream_chat(self, messages, system_instruction, temperature, max_output_tokens):
+    def generate_json(self, messages, system_instruction, temperature, max_output_tokens):
         kwargs = {
             "model": self.chat_model,
             "messages": self._to_messages(messages, system_instruction),
             "temperature": temperature,
-            "stream": True,
+            # Modo JSON do protocolo OpenAI (suportado por Groq/Mistral/Cerebras).
+            # Exige que a palavra "json" apareça no prompt — garantido pela persona.
+            "response_format": {"type": "json_object"},
         }
         if max_output_tokens:
             kwargs[self._max_tokens_param] = max_output_tokens
-        stream = self._create(**kwargs)
-        truncated = False
-        for chunk in stream:
-            choice = (chunk.choices or [None])[0]
-            if not choice:
-                continue
-            if choice.delta and choice.delta.content:
-                yield choice.delta.content
-            if choice.finish_reason == "length":
-                truncated = True
-        if truncated:
-            yield "\n\n_(resposta interrompida por limite de tamanho)_"
+        resp = self._create(**kwargs)
+        return resp.choices[0].message.content or ""
 
 class GroqProvider(_OpenAICompatProvider):
     def __init__(self, api_key: str, chat_model: str):
@@ -161,60 +153,30 @@ class ProviderRouter:
     def names(self) -> list[str]:
         return [p.name for p in self.providers]
 
-    def open_stream(
+    def generate_json(
         self, messages, system_instruction, temperature, max_output_tokens
-    ) -> tuple[str | None, Iterator[str]]:
-        """Seleciona o primeiro provedor que consegue abrir o stream.
+    ) -> tuple[str | None, str | None]:
+        """Tenta cada provedor em ordem até um responder com sucesso.
 
-        Retorna (nome_do_provedor, gerador). O gerador já inclui o primeiro
-        chunk e a resiliência a falhas no meio do stream. Forçar o primeiro
-        chunk aqui faz com que falhas de abertura (chave inválida, 429, etc.)
-        acionem o fallback ANTES de qualquer byte chegar ao cliente — e permite
-        ao chamador saber qual provedor respondeu (ex.: para um header HTTP).
-        Se todos falharem, retorna (None, gerador_com_mensagem_amigável).
+        Retorna (nome_do_provedor, texto_json_cru). Sem streaming, o fallback é
+        um simples try/except: qualquer falha de um provedor (chave inválida,
+        429, indisponibilidade) faz o próximo assumir. Se todos falharem,
+        retorna (None, None) e o chamador decide a mensagem amigável.
         """
         errors: list[str] = []
         for provider in self.providers:
             try:
-                stream = provider.stream_chat(
+                raw = provider.generate_json(
                     messages, system_instruction, temperature, max_output_tokens
                 )
-                first = next(stream)
-            except StopIteration:
-                # Provedor abriu mas não produziu nada: sucesso vazio.
-                return provider.name, iter(())
             except Exception as exc:
-                logger.warning("Provedor '%s' falhou ao abrir o stream: %s", provider.name, exc)
+                logger.warning("Provedor '%s' falhou: %s", provider.name, exc)
                 errors.append(f"{provider.name}: {exc}")
                 continue
-            return provider.name, self._continue(provider, first, stream)
+            return provider.name, raw
 
-        logger.error("Todos os provedores falharam no stream: %s", " | ".join(errors))
-        return None, iter(
-            ("\n\n⚠️ Nenhuma IA está disponível no momento. Tente novamente em alguns instantes.",)
-        )
-
-    @staticmethod
-    def _continue(provider: LLMProvider, first: str, stream: Iterator[str]) -> Iterator[str]:
-        yield first
-        try:
-            for chunk in stream:
-                yield chunk
-        except Exception as exc:
-            logger.warning("Provedor '%s' falhou no meio do stream: %s", provider.name, exc)
-            if "RESOURCE_EXHAUSTED" in str(exc) or "429" in str(exc):
-                yield "\n\n⚠️ Limite de uso da IA atingido. Tente novamente em alguns instantes."
-            else:
-                yield "\n\n⚠️ Tive um problema para gerar a resposta. Pode tentar de novo?"
-
-    def stream_chat(
-        self, messages, system_instruction, temperature, max_output_tokens
-    ) -> Iterator[str]:
-        """Conveniência: streama a resposta descartando o nome do provedor."""
-        _, gen = self.open_stream(
-            messages, system_instruction, temperature, max_output_tokens
-        )
-        yield from gen
+        logger.error("Todos os provedores falharam: %s", " | ".join(errors))
+        return None, None
 
 def build_router_from_env() -> ProviderRouter:
     order = [
