@@ -37,9 +37,9 @@ ser sobrescritos pelo cliente.
 
 ## Pré-requisitos
 
-- Python 3.11+
-- Node.js 18+
-- Pelo menos uma chave de API entre Mistral, Gemini e Groq.
+- Pelo menos uma chave de API entre Mistral, Gemini, Groq e Cerebras.
+- **Com Docker** (caminho recomendado): Docker + Docker Compose.
+- **Sem Docker** (setup manual): Python 3.11+ e Node.js 18+.
 
 ## Configuração
 
@@ -70,7 +70,44 @@ Variáveis disponíveis (veja `.env.example`):
 > Mantenha o `.env.example` apenas com placeholders — chaves reais vão somente no
 > `.env` (que está no `.gitignore`).
 
-## Backend
+## Executando com Docker
+
+Com o `.env` preenchido, suba tudo com um comando na raiz do projeto:
+
+```bash
+docker compose up --build
+```
+
+Isso usa o `docker-compose.override.yml` (mesclado automaticamente) e sobe o
+ambiente de **desenvolvimento**, com *hot-reload* no backend e no frontend:
+
+| Serviço | URL |
+| --- | --- |
+| App (frontend, Vite) | http://localhost:5173 |
+| Backend (FastAPI, Swagger em `/docs`) | http://localhost:8000 |
+
+O Compose aguarda o backend ficar *healthy* (passar no `/health`) antes de subir o
+frontend. Editar arquivos `.py` ou do frontend recarrega na hora — o código é
+montado como volume. Para parar: `Ctrl+C` e depois `docker compose down`.
+
+### Produção
+
+Para subir a versão de produção — frontend buildado e servido pelo **Nginx**, que
+também faz o proxy reverso de `/api` para o backend —, ignore o override:
+
+```bash
+docker compose -f docker-compose.yml up --build
+```
+
+| Serviço | URL |
+| --- | --- |
+| App (Nginx servindo o build) | http://localhost:8080 |
+
+Nesse modo o backend **não** expõe porta ao host (só é acessível pela rede interna,
+via Nginx). Como o `TRUST_PROXY_HEADERS` é ativado para o Nginx à frente, o rate
+limit por IP usa o IP real do cliente (`X-Forwarded-For`).
+
+## Backend (setup manual)
 
 ```bash
 cd backend
@@ -87,7 +124,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-## Frontend
+## Frontend (setup manual)
 
 ```bash
 cd frontend

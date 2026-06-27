@@ -1,0 +1,36 @@
+# Override de DESENVOLVIMENTO — mesclado automaticamente em `docker compose up`.
+# Para subir a configuração de PRODUÇÃO (sem este override), use:
+#   docker compose -f docker-compose.yml up --build
+services:
+  backend:
+    # Código montado do host + --reload: salvou um .py, o uvicorn reinicia.
+    volumes:
+      - ./backend:/app
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # Em dev é cômodo bater direto na API (docs em http://localhost:8000/docs).
+    ports:
+      - "8000:8000"
+
+  frontend:
+    # Usa o estágio "dev" do Dockerfile (Vite dev server, não o Nginx).
+    build:
+      context: ./frontend
+      target: dev
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+    environment:
+      # No dev server, o Vite faz o proxy de /api para o backend da rede interna.
+      VITE_API_PROXY_TARGET: "http://backend:8000"
+    volumes:
+      # Código-fonte montado para hot-reload (HMR)...
+      - ./frontend:/app
+      # ...mas preserva o node_modules instalado na imagem (volume anônimo).
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    # Override do healthcheck de produção (que checa a porta 80 do Nginx).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5173/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
