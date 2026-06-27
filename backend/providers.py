@@ -33,11 +33,12 @@ class LLMProvider:
 class GeminiProvider(LLMProvider):
     name = "gemini"
 
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, thinking_budget: int = 1024):
         from google import genai
 
         self._genai = genai
         self.model = model
+        self.thinking_budget = thinking_budget
         self.client = genai.Client(api_key=api_key)
 
     @staticmethod
@@ -47,14 +48,17 @@ class GeminiProvider(LLMProvider):
     def generate_json(self, messages, system_instruction, temperature, max_output_tokens):
         from google.genai import types
 
+        effective_max = max_output_tokens
+        if self.thinking_budget > 0 and effective_max:
+            effective_max = effective_max + self.thinking_budget
+
         config = types.GenerateContentConfig(
             temperature=temperature,
             system_instruction=system_instruction,
-            max_output_tokens=max_output_tokens,
-            # Força saída sintaticamente válida em JSON; a forma do objeto vem da
-            # instrução de sistema (campos "message" e "options").
+            max_output_tokens=effective_max,
+
             response_mime_type="application/json",
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            thinking_config=types.ThinkingConfig(thinking_budget=self.thinking_budget),
         )
         resp = self.client.models.generate_content(
             model=self.model,
@@ -191,6 +195,8 @@ def build_router_from_env() -> ProviderRouter:
     gemini_key = os.getenv("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
+    gemini_thinking = int(os.getenv("GEMINI_THINKING_BUDGET", "1024"))
+
     groq_key = os.getenv("GROQ_API_KEY") or os.getenv("GROK_API_KEY")
     groq_chat_model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
@@ -201,7 +207,7 @@ def build_router_from_env() -> ProviderRouter:
     if mistral_key:
         available["mistral"] = MistralProvider(mistral_key, mistral_chat_model)
     if gemini_key:
-        available["gemini"] = GeminiProvider(gemini_key, gemini_model)
+        available["gemini"] = GeminiProvider(gemini_key, gemini_model, gemini_thinking)
     if groq_key:
         available["groq"] = GroqProvider(groq_key, groq_chat_model)
     if cerebras_key:
