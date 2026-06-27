@@ -15,12 +15,11 @@ type Item = {
 };
 
 const STARTERS: { label: string; text: string }[] = [
-  { label: "Não sei explicar", text: "Não sei explicar direito o que estou sentindo..." },
-  { label: "Só quero desabafar", text: "Só quero desabafar um pouco..." },
-  { label: "Estou confuso(a)", text: "Estou confuso(a), minha cabeça está meio bagunçada..." },
-  { label: "Ansioso(a), mas não sei por quê", text: "Estou ansioso(a), mas não sei explicar por quê..." },
-  { label: "Aconteceu algo e não sei como me sinto", text: "Aconteceu uma coisa e não sei bem como me sinto sobre isso..." },
-  { label: "Quero entender o que sinto", text: "Queria entender melhor o que estou sentindo..." },
+  { label: "Não sei o que sinto", text: "Tem algo me incomodando e eu não consigo nomear o que é" },
+  { label: "Preciso desabafar", text: "Aconteceu uma coisa e eu preciso colocar pra fora" },
+  { label: "Tô sobrecarregado(a)", text: "Sinto que é coisa demais e que eu não tô dando conta" },
+  { label: "Me entender melhor", text: "Queria entender por que eu reajo do jeito que reajo" },
+  { label: "Uma decisão", text: "Tô travado(a) numa escolha e não sei o que fazer" },
 ];
 
 // Converte uma resposta HTTP de erro numa mensagem acolhedora para a pessoa.
@@ -257,9 +256,9 @@ export default function App() {
     <div className={`app ${isEmpty ? "is-empty" : ""}`}>
       {isEmpty ? (
         <div className="hero">
-          <h1 className="hero-title">Oi, eu sou o Clare.ia 🌱</h1>
+          <h1 className="hero-title">Oi, eu sou a Clare.ia 🌱</h1>
           <p className="hero-desc">
-            Me conte como você está se sentindo ou pelo que está passando...
+            Como posso te ajudar hoje?
           </p>
           {composer}
           <div className="starters">
