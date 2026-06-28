@@ -1,0 +1,6 @@
+# Configuração do Ruff (linter do backend). Mantém o lint local idêntico ao do CI.
+target-version = "py312"
+line-length = 100
+
+# Não analisa o ambiente virtual.
+extend-exclude = [".venv"]

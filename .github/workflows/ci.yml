@@ -1,0 +1,88 @@
+name: CI
+
+# Roda em todo push na main e em todo Pull Request. Assim, qualquer mudança
+# é testada automaticamente antes de ser integrada.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancela execuções antigas do mesmo branch/PR quando um novo push chega
+# (economiza tempo e minutos de runner).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --- Backend: lint (ruff) + testes (pytest) ---
+  backend:
+    name: Backend (lint + testes)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Instalar dependências
+        run: |
+          pip install -r requirements-dev.txt
+          pip install ruff
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Testes (pytest)
+        # Os testes são "sem rede", mas o import de main.py exige ao menos um
+        # provider configurado. Uma chave fictícia satisfaz essa checagem sem
+        # que nenhuma API seja realmente chamada.
+        env:
+          LLM_PROVIDERS: gemini
+          GEMINI_API_KEY: ci-dummy-key
+        run: pytest -q
+
+  # --- Frontend: type-check + build + testes (vitest) ---
+  frontend:
+    name: Frontend (build + testes)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Build (tsc -b + vite build)
+        run: npm run build
+
+      - name: Testes (vitest)
+        run: npm test
+
+  # --- Docker: valida que as duas imagens constroem ---
+  docker:
+    name: Build das imagens Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build da imagem do backend
+        run: docker build -t clare-backend ./backend
+
+      - name: Build da imagem do frontend
+        run: docker build -t clare-frontend ./frontend
