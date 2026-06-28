@@ -1,2 +1,5 @@
 -r requirements.txt
 pytest==8.3.4
+# boto3: usado pelos testes da hidratação SSM (3.4). NÃO vai no pacote Lambda —
+# o runtime do Lambda já traz boto3 embutido (ver requirements-lambda.txt).
+boto3==1.43.36

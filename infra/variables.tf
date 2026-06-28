@@ -36,6 +36,18 @@ variable "enable_cloudfront" {
   default     = false
 }
 
+variable "lambda_aws_endpoint_url" {
+  description = <<-EOT
+    Endpoint AWS que a Lambda usa para chamar outros serviços (ex.: SSM) via boto3.
+    Na AWS real, deixe VAZIO (o boto3 usa os endpoints padrão da AWS). No LocalStack,
+    o container da função NÃO enxerga o `localhost` do host: aponte para o gateway
+    do LocalStack acessível de dentro da rede Docker
+    (ex.: "http://localhost.localstack.cloud:4566"). Só é injetado se não-vazio.
+  EOT
+  type        = string
+  default     = ""
+}
+
 variable "provider_api_keys" {
   description = <<-EOT
     Mapa nome->valor das chaves de API dos provedores LLM, gravadas como
