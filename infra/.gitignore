@@ -1,0 +1,25 @@
+# Arquivos de trabalho do Terraform — nunca versionados.
+
+# Plugins/provedores baixados pelo `init` (pesados, recriáveis).
+.terraform/
+
+# OBS: o .terraform.lock.hcl É versionado de propósito (convenção HashiCorp) —
+# ele fixa os hashes dos providers para builds reprodutíveis no CI e na Fase 4.
+
+# Estado da infraestrutura: pode conter dados sensíveis e é específico do ambiente.
+# (Na Fase 4 moveremos o state para um backend remoto no S3.)
+*.tfstate
+*.tfstate.*
+terraform.tfstate.d/
+
+# Arquivos de variáveis com valores reais (segredos).
+*.tfvars
+!example.tfvars
+
+# Planos salvos.
+*.tfplan
+crash.log
+
+# Artefatos de empacotamento da Lambda (zip recriável pelo archive provider).
+build/
+*.zip
