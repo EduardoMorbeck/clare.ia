@@ -1,5 +1,7 @@
 # clare.ia
 
+[![CI](https://github.com/EduardoMorbeck/clare.ia/actions/workflows/ci.yml/badge.svg)](https://github.com/EduardoMorbeck/clare.ia/actions/workflows/ci.yml)
+
 Assistente de **reflexão emocional** em português do Brasil. Conversa de forma
 acolhedora para ajudar a pessoa a organizar pensamentos e sentimentos.
 
