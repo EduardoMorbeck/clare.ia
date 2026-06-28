@@ -7,6 +7,7 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from mangum import Mangum
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -339,6 +340,14 @@ def chat(request: Request, req: ChatRequest):
         message = _ensure_support_note(message)
 
     return _reply(message, options, provider_name)
+
+# Ponto de entrada para o AWS Lambda. O Mangum traduz o evento do Lambda
+# (API Gateway) para o protocolo ASGI que o FastAPI entende — e a resposta de
+# volta. O mesmo `app` continua servindo via Uvicorn localmente (abaixo) e via
+# Lambda em produção; nada da aplicação muda. A AWS é configurada para chamar
+# "main.handler". lifespan="off" porque a app não usa eventos de startup/shutdown
+# (sem isso, o Mangum tenta gerenciá-los à toa e emite um aviso).
+handler = Mangum(app, lifespan="off")
 
 if __name__ == "__main__":
     import uvicorn
