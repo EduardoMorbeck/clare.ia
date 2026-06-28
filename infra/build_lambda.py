@@ -27,7 +27,7 @@ BACKEND_DIR = REPO_ROOT / "backend"
 PKG_DIR = INFRA_DIR / "build" / "lambda_pkg"
 
 # Código-fonte da aplicação que vai na raiz do zip (ao lado das deps).
-SOURCE_FILES = ["main.py", "providers.py"]
+SOURCE_FILES = ["main.py", "providers.py", "ssm_config.py"]
 
 PYTHON_VERSION = "3.12"
 

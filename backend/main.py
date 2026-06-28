@@ -17,8 +17,13 @@ from slowapi.util import get_remote_address
 from starlette.responses import PlainTextResponse
 
 from providers import build_router_from_env
+from ssm_config import hydrate_env_from_ssm
 
+# Ordem importa: o .env é o baseline (fallback de dev local); o SSM sobrepõe por
+# cima quando `SSM_PARAM_PREFIX` está definido (fonte da verdade na nuvem). Só
+# então montamos o router, que lê tudo de os.getenv sem saber a origem da chave.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+hydrate_env_from_ssm()
 
 logger = logging.getLogger("clare.main")
 

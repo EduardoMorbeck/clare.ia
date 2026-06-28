@@ -24,12 +24,22 @@ resource "aws_lambda_function" "api" {
   memory_size = 256
 
   environment {
-    variables = {
-      # PROVISÓRIO (3.3.c): o app exige ao menos uma chave de provedor no import,
-      # senão levanta RuntimeError. Esta chave fictícia só permite o cold start e
-      # o /health; o /api/chat real falharia. No passo 3.4 estas chaves passam a
-      # ser lidas do SSM Parameter Store, e este bloco sai.
-      GEMINI_API_KEY = "localstack-dummy"
-    }
+    variables = local.lambda_env
   }
+}
+
+locals {
+  lambda_env = merge(
+    {
+      # Onde a aplicação busca as chaves de provedor no cold start (3.4). O
+      # ssm_config.hydrate_env_from_ssm() lê todos os parâmetros sob este prefixo
+      # e os injeta em os.environ; sem ele, o app cai no fallback do .env (que não
+      # existe no pacote Lambda). Mantém os segredos fora do código e da env var.
+      # Nenhuma chave de provedor é "chumbada" aqui — todas vêm do SSM.
+      SSM_PARAM_PREFIX = "/${var.project_name}/"
+    },
+    # Só no LocalStack: o boto3 precisa de um endpoint que o container da função
+    # alcance. Na AWS real a var fica vazia e nada é injetado (endpoints padrão).
+    var.lambda_aws_endpoint_url != "" ? { AWS_ENDPOINT_URL = var.lambda_aws_endpoint_url } : {}
+  )
 }
