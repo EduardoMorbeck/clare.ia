@@ -16,6 +16,10 @@ terraform.tfstate.d/
 *.tfvars
 !example.tfvars
 
+# Config do backend remoto (contém account id; repo é público). O modelo
+# backend.aws.hcl.example É versionado.
+backend.aws.hcl
+
 # Planos salvos.
 *.tfplan
 crash.log
