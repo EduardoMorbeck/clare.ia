@@ -29,6 +29,12 @@ resource "aws_lambda_function" "api" {
 }
 
 locals {
+  # Origem permitida no CORS. Quando o CloudFront está ligado (AWS real), o front
+  # door é o domínio dele (HTTPS) — referenciamos o atributo do recurso, então o
+  # Terraform cria o CloudFront ANTES da Lambda e injeta o domínio certo numa única
+  # passada (sem hardcode e sem 2º apply). Localmente (CF desligado) cai no Vite dev.
+  frontend_origin = var.enable_cloudfront ? "https://${aws_cloudfront_distribution.frontend[0].domain_name}" : "http://localhost:5173"
+
   lambda_env = merge(
     {
       # Onde a aplicação busca as chaves de provedor no cold start (3.4). O
@@ -37,6 +43,10 @@ locals {
       # existe no pacote Lambda). Mantém os segredos fora do código e da env var.
       # Nenhuma chave de provedor é "chumbada" aqui — todas vêm do SSM.
       SSM_PARAM_PREFIX = "/${var.project_name}/"
+
+      # CORS: sem isto o app cairia no default "http://localhost:5173" e o navegador
+      # bloquearia o frontend servido pelo CloudFront. Lido por ALLOWED_ORIGINS em main.py.
+      ALLOWED_ORIGINS = local.frontend_origin
     },
     # Só no LocalStack: o boto3 precisa de um endpoint que o container da função
     # alcance. Na AWS real a var fica vazia e nada é injetado (endpoints padrão).

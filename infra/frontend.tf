@@ -3,10 +3,15 @@
 # lê-lo, via Origin Access Control (OAC). Ninguém acessa o S3 direto; tudo passa
 # pelo CDN (cache + HTTPS + domínio único).
 
+# Descobre o account id da conta autenticada (sem chumbar o número no código —
+# importante porque o repo é público). No LocalStack devolve um id de teste.
+data "aws_caller_identity" "current" {}
+
 # Bucket que guarda o build do Vite (index.html, assets/...).
-# OBS: nome de bucket é global na AWS real; na Fase 4 pode precisar de sufixo.
+# Nome de bucket é GLOBAL na AWS: o sufixo com o account id garante unicidade
+# (`clare-ia-frontend` sozinho colidiria com qualquer outra conta que já o tenha).
 resource "aws_s3_bucket" "frontend" {
-  bucket = "${var.project_name}-frontend"
+  bucket = "${var.project_name}-frontend-${data.aws_caller_identity.current.account_id}"
 }
 
 # Bloqueia todo acesso público direto ao bucket (o acesso é só via CloudFront).
