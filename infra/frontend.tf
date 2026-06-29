@@ -46,6 +46,40 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend[0].id
   }
 
+  # 2º origin: o API Gateway. Assim o CloudFront vira a PORTA ÚNICA — o frontend
+  # chama "/api/..." no próprio domínio do CDN e o CloudFront repassa ao backend
+  # (mesma origem → sem CORS). `origin_path = /prod` injeta o stage, então o
+  # "/api/chat" do navegador vira "/prod/api/chat" no API Gateway.
+  origin {
+    domain_name = "${aws_api_gateway_rest_api.http.id}.execute-api.${var.aws_region}.amazonaws.com"
+    origin_id   = "apigw"
+    origin_path = "/${var.api_stage_name}"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only" # API Gateway só fala HTTPS
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
+  # Roteia "/api/*" para o backend. Vem ANTES do default (que serve o S3).
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
+    target_origin_id       = "apigw"
+    viewer_protocol_policy = "redirect-to-https"
+    # API aceita qualquer verbo (o chat é POST); GET/HEAD podem ser cacheados.
+    allowed_methods = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods  = ["GET", "HEAD"]
+
+    # Policies gerenciadas da AWS (IDs são constantes globais):
+    #  - CachingDisabled: nunca cacheia respostas da API.
+    #  - AllViewerExceptHostHeader: encaminha headers/query/body do cliente, MENOS
+    #    o Host (o API Gateway recusa um Host que não seja o dele).
+    cache_policy_id          = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+    origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+  }
+
   default_cache_behavior {
     target_origin_id       = "s3-frontend"
     viewer_protocol_policy = "redirect-to-https"
