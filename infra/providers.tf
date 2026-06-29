@@ -4,6 +4,14 @@
 terraform {
   required_version = ">= 1.5"
 
+  # Backend remoto: o state vive num bucket S3 (durável, versionado, compartilhável
+  # com o CI da Fase 5). Bloco PARCIAL de propósito (chaves vazias): os valores
+  # concretos (bucket/key/region) entram via `-backend-config=backend.aws.hcl` no
+  # `init`. Assim a MESMA config serve para a AWS real e para o LocalStack (onde o
+  # `tflocal` injeta o backend automaticamente). `use_lockfile` (Terraform 1.11+)
+  # faz a trava nativa no próprio S3 — dispensa o DynamoDB.
+  backend "s3" {}
+
   required_providers {
     # Provider da AWS: cria/gerencia recursos (Lambda, S3, IAM, ...).
     aws = {

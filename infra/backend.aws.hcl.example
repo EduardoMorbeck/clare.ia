@@ -1,0 +1,8 @@
+# Modelo do backend S3 da AWS real. Copie para `backend.aws.hcl` (gitignorado) e
+# preencha com o seu bucket de state. Uso:
+#   terraform -chdir=infra init -backend-config=backend.aws.hcl
+bucket       = "SEU-BUCKET-DE-STATE"          # ex.: clare-ia-tfstate-<account_id>
+key          = "clare-ia/prod/terraform.tfstate"
+region       = "us-east-1"
+encrypt      = true
+use_lockfile = true                            # trava nativa no S3 (Terraform 1.11+)
