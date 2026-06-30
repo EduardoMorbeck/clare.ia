@@ -140,6 +140,16 @@ resource "aws_iam_role_policy_attachment" "plan_readonly" {
   policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
 }
 
+# A role de APPLY também recebe ReadOnlyAccess. O `terraform apply` faz um refresh
+# (lê TODOS os recursos) antes de aplicar; leitura ampla garante que o refresh nunca
+# falhe por uma permissão de leitura faltando. A fronteira que importa segue intacta:
+# a ESCRITA é escopada (data.aws_iam_policy_document.tf_apply) e a role só é assumível
+# no push para a main. Ler não altera nada.
+resource "aws_iam_role_policy_attachment" "apply_readonly" {
+  role       = aws_iam_role.gha_apply.name
+  policy_arn = "arn:aws:iam::aws:policy/ReadOnlyAccess"
+}
+
 # ----------------------------------------------------------------------------
 # 3c) Permissões de ESCRITA da role de apply (o menor privilégio possível aqui)
 # ----------------------------------------------------------------------------
