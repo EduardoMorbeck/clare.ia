@@ -1,0 +1,18 @@
+# Dependências de TOPO da Lambda (backend serverless) — fonte de verdade.
+#
+# Edite SÓ este arquivo. O lock completo (com todas as transitivas pinadas e
+# com hash) é o requirements-lambda.txt, GERADO por:
+#
+#     python infra/lock_lambda_deps.py
+#
+# Difere de requirements.txt por NÃO incluir o uvicorn[standard]: no Lambda quem
+# fala ASGI é o Mangum, não o uvicorn. Tirar o uvicorn reduz o tamanho do .zip
+# e evita wheels binárias desnecessárias (uvloop/watchfiles).
+fastapi==0.115.6
+slowapi==0.1.9
+google-genai==2.9.0
+groq==1.4.0
+openai==2.43.0
+python-dotenv==1.0.1
+pydantic==2.13.4
+mangum==0.19.0
