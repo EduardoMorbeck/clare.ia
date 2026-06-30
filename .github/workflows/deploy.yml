@@ -61,6 +61,11 @@ jobs:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
           aws-region: us-east-1
 
+      # Repo público: registra o account id como valor mascarado, para o GitHub
+      # substituí-lo por *** em todo log subsequente (o plano cru imprime os ARNs).
+      - name: Mascarar account id nos logs
+        run: echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+
       # Init com backend S3. Só o nome do bucket (que carrega o account id) vem de
       # uma repository variable, para não ficar no yaml do repo público. key/region
       # não são sensíveis.
@@ -149,6 +154,11 @@ jobs:
           role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
           aws-region: us-east-1
 
+      # Repo público: mascara o account id (o apply imprime os ARNs e o s3 sync
+      # imprime o nome do bucket, ambos com o account id) em todo log subsequente.
+      - name: Mascarar account id nos logs
+        run: echo "::add-mask::$(aws sts get-caller-identity --query Account --output text)"
+
       - name: Terraform Init
         run: |
           terraform init \
@@ -163,3 +173,43 @@ jobs:
         # prod.tfvars (sem segredo) liga o CloudFront etc.; os SecureString têm o
         # valor ignorado (ssm.tf), então o apply nunca toca nas chaves dos provedores.
         run: terraform apply -input=false -auto-approve -var-file=prod.tfvars
+
+      # Lê os outputs do state (após o apply) para saber para onde subir o frontend.
+      - name: Capturar outputs do Terraform
+        id: tfout
+        run: |
+          echo "bucket=$(terraform output -raw frontend_bucket)" >> "$GITHUB_OUTPUT"
+          echo "dist_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"
+
+      - name: Configurar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build do frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Subir o frontend no S3
+        working-directory: frontend
+        # assets/* têm hash no nome -> cache "immutable" de 1 ano; --delete remove os
+        # arquivos antigos. O index.html vai por último, com no-cache (sempre fresco):
+        # senão o navegador serviria um HTML velho apontando para assets que já sumiram.
+        run: |
+          aws s3 sync dist "s3://${{ steps.tfout.outputs.bucket }}" \
+            --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+          aws s3 cp dist/index.html "s3://${{ steps.tfout.outputs.bucket }}/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate"
+
+      # Invalida o cache do CDN para os usuários verem a versão nova imediatamente.
+      - name: Invalidar o cache do CloudFront
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tfout.outputs.dist_id }}" \
+            --paths "/*"
