@@ -122,6 +122,11 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     name: Terraform Apply (merge na main)
     runs-on: ubuntu-latest
+    # Gate de aprovação: este job só roda depois que um reviewer aprova no GitHub.
+    # O Environment "production" (criado em Settings -> Environments) tem um required
+    # reviewer; ao referenciá-lo aqui, o GitHub PAUSA o apply esperando o "approve"
+    # antes de tocar na AWS. Sem o reviewer configurado, não há pausa.
+    environment: production
     # Serializa os applies: nunca dois ao mesmo tempo (evita corrida no state/lock).
     concurrency:
       group: cd-apply-main
