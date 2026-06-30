@@ -1,0 +1,109 @@
+name: CD (deploy)
+
+# Fase 5 — entrega contínua na AWS via OIDC (sem chave estática no repo).
+# Por enquanto este workflow só faz `terraform plan` em Pull Requests e comenta o
+# plano no PR. O `apply` no merge entra no passo 5.4.
+on:
+  pull_request:
+
+# Permissões do GITHUB_TOKEN deste workflow:
+#  - id-token: write  -> OBRIGATÓRIO para o OIDC (gera o token que a AWS troca por
+#                        credenciais temporárias). Sem isto, o login federado falha.
+#  - contents: read   -> checkout do código.
+#  - pull-requests: write -> postar o comentário com o plano no PR.
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+# Evita planos concorrentes do mesmo PR (e não cancela no meio, para não deixar
+# lock órfão no state).
+concurrency:
+  group: cd-plan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Terraform Plan (PR)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      # O archive_file da Lambda lê infra/build/lambda_pkg/, que não está no repo
+      # (é artefato recriável). Precisamos empacotar ANTES do terraform, senão o
+      # data source falha. build_lambda.py é cross-platform e roda no runner Linux.
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Empacotar a Lambda
+        working-directory: .
+        run: python infra/build_lambda.py
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.7"
+
+      # Login na AWS por OIDC: assume a role de PLAN (read-only). A action gera o
+      # token OIDC do GitHub e chama sts:AssumeRoleWithWebIdentity. A role só é
+      # assumível em eventos de Pull Request (trust policy travada em :pull_request).
+      - name: Login AWS (OIDC, role de plan)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+
+      # Init com backend S3. Só o nome do bucket (que carrega o account id) vem de
+      # uma repository variable, para não ficar no yaml do repo público. key/region
+      # não são sensíveis.
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.AWS_TFSTATE_BUCKET }}" \
+            -backend-config="key=clare-ia/prod/terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true" \
+            -input=false
+
+      - name: Terraform Plan
+        id: plan
+        # prod.tfvars (versionado, sem segredo) liga o CloudFront etc. As chaves dos
+        # provedores ficam fora: o Terraform ignora o valor dos SecureString (ssm.tf).
+        run: terraform plan -input=false -var-file=prod.tfvars -no-color
+
+      # Comenta o plano no PR para revisão humana antes do merge.
+      - name: Comentar o plano no PR
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          PLAN_STDOUT: ${{ steps.plan.outputs.stdout }}
+        with:
+          script: |
+            // Repo público: mascara qualquer sequência de 12 dígitos (account id da
+            // AWS) que apareça nos ARNs do plano, mantendo o account id fora do repo.
+            let plan = (process.env.PLAN_STDOUT || '(sem saída)').replace(/\d{12}/g, '************');
+            const max = 60000;
+            if (plan.length > max) plan = plan.substring(0, max) + '\n... (plano truncado)';
+            const body = `#### Terraform Plan 📖 \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Mostrar plano</summary>
+
+            \`\`\`terraform
+            ${plan}
+            \`\`\`
+
+            </details>
+
+            *Disparado por @${{ github.actor }} no commit \`${{ github.sha }}\`.*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
