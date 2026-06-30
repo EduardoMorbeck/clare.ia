@@ -22,3 +22,8 @@ output "cloudfront_domain" {
   # `one()` devolve o único elemento da lista (count=1) ou null (count=0).
   value = one(aws_cloudfront_distribution.frontend[*].domain_name)
 }
+
+output "cloudfront_distribution_id" {
+  description = "ID da distribuição CloudFront (null se desligada). Usado pelo CD para invalidar o cache após subir o frontend."
+  value       = one(aws_cloudfront_distribution.frontend[*].id)
+}
