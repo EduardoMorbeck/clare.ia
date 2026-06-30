@@ -48,6 +48,19 @@ variable "lambda_aws_endpoint_url" {
   default     = ""
 }
 
+variable "provider_key_names" {
+  description = <<-EOT
+    Nomes dos parâmetros SSM de chaves de provedor que SEMPRE existem na infra,
+    independentemente de termos os valores em mãos. O `for_each` do
+    aws_ssm_parameter.provider_keys itera por esta lista (estática, não-sensível) —
+    nunca pelas chaves do mapa de segredos — para que o pipeline de CD possa rodar
+    sem os valores sem destruir os parâmetros. Os VALORES vêm do tfvars local na 1ª
+    semeadura e depois são ignorados (lifecycle ignore_changes em ssm.tf).
+  EOT
+  type        = list(string)
+  default     = ["GEMINI_API_KEY", "GROQ_API_KEY", "CEREBRAS_API_KEY", "MISTRAL_API_KEY"]
+}
+
 variable "provider_api_keys" {
   description = <<-EOT
     Mapa nome->valor das chaves de API dos provedores LLM, gravadas como

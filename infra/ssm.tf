@@ -7,12 +7,25 @@
 # gitignorado). Sem tfvars, o mapa é vazio e nenhum parâmetro é criado.
 
 resource "aws_ssm_parameter" "provider_keys" {
-  # Iteramos pelos NOMES das chaves (não são segredos) — os VALORES é que são
-  # sensíveis. `nonsensitive` é seguro aqui porque só expõe os nomes, e o
-  # `for_each` não aceita um conjunto derivado de valor sensível.
-  for_each = toset(nonsensitive(keys(var.provider_api_keys)))
+  # IMPORTANTE (Fase 5 / CD): iteramos sobre uma lista ESTÁTICA de nomes
+  # (var.provider_key_names), NÃO sobre as chaves do mapa de segredos. Assim os
+  # parâmetros existem na infra mesmo quando o pipeline roda sem os valores em mãos
+  # (o CI não tem o tfvars). Se o for_each dependesse do mapa, um apply sem segredos
+  # esvaziaria o conjunto e DESTRUIRIA os 4 parâmetros — quebrando o app em produção.
+  for_each = toset(var.provider_key_names)
 
-  name  = "/${var.project_name}/${each.key}"
-  type  = "SecureString"
-  value = var.provider_api_keys[each.key]
+  name = "/${var.project_name}/${each.key}"
+  type = "SecureString"
+
+  # O valor real é semeado UMA vez a partir do tfvars local. No CI (sem tfvars), o
+  # lookup cai no placeholder — que nunca chega a ser gravado por causa do
+  # ignore_changes abaixo. Ou seja: o Terraform gerencia a EXISTÊNCIA do parâmetro,
+  # mas o VALOR é tratado fora de banda (semeadura local) e nunca sobrescrito pelo CD.
+  value = lookup(var.provider_api_keys, each.key, "PLACEHOLDER_MANAGED_OUT_OF_BAND")
+
+  lifecycle {
+    # Tira o valor do controle do Terraform: nenhum plan/apply (local ou no CI) vai
+    # propor alterá-lo. É o que permite ao CD rodar sem nunca tocar nos segredos.
+    ignore_changes = [value]
+  }
 }

@@ -15,6 +15,9 @@ terraform.tfstate.d/
 # Arquivos de variáveis com valores reais (segredos).
 *.tfvars
 !example.tfvars
+# prod.tfvars É versionado: só config não-secreta (enable_cloudfront etc.) que o
+# CI/CD precisa. Os segredos ficam no SSM e são ignorados pelo Terraform (ssm.tf).
+!prod.tfvars
 
 # Config do backend remoto (contém account id; repo é público). O modelo
 # backend.aws.hcl.example É versionado.
