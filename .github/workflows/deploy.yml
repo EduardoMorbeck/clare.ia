@@ -1,10 +1,12 @@
 name: CD (deploy)
 
 # Fase 5 — entrega contínua na AWS via OIDC (sem chave estática no repo).
-# Por enquanto este workflow só faz `terraform plan` em Pull Requests e comenta o
-# plano no PR. O `apply` no merge entra no passo 5.4.
+#  - Em Pull Request: `terraform plan` (role de plan, read-only) e comenta no PR.
+#  - No merge para main: `terraform apply` (role de apply, escrita).
 on:
   pull_request:
+  push:
+    branches: [main]
 
 # Permissões do GITHUB_TOKEN deste workflow:
 #  - id-token: write  -> OBRIGATÓRIO para o OIDC (gera o token que a AWS troca por
@@ -16,16 +18,17 @@ permissions:
   contents: read
   pull-requests: write
 
-# Evita planos concorrentes do mesmo PR (e não cancela no meio, para não deixar
-# lock órfão no state).
-concurrency:
-  group: cd-plan-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   plan:
+    # Só em Pull Request. (No push para main quem roda é o job `apply`.)
+    if: github.event_name == 'pull_request'
     name: Terraform Plan (PR)
     runs-on: ubuntu-latest
+    # Evita planos concorrentes do mesmo PR (sem cancelar no meio, para não deixar
+    # lock órfão no state).
+    concurrency:
+      group: cd-plan-${{ github.ref }}
+      cancel-in-progress: false
     defaults:
       run:
         working-directory: infra
@@ -107,3 +110,56 @@ jobs:
               repo: context.repo.repo,
               body,
             });
+
+  apply:
+    # Só no push para a main (= merge de um PR). É aqui que a infra é aplicada de
+    # verdade na AWS. O plano já foi revisado no PR antes do merge.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    name: Terraform Apply (merge na main)
+    runs-on: ubuntu-latest
+    # Serializa os applies: nunca dois ao mesmo tempo (evita corrida no state/lock).
+    concurrency:
+      group: cd-apply-main
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Empacotar a Lambda
+        working-directory: .
+        run: python infra/build_lambda.py
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.7"
+
+      # Login na AWS por OIDC: assume a role de APPLY (escrita). Ela só é assumível
+      # em jobs rodando NA branch main (trust policy travada em ref:refs/heads/main).
+      - name: Login AWS (OIDC, role de apply)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.AWS_TFSTATE_BUCKET }}" \
+            -backend-config="key=clare-ia/prod/terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true" \
+            -input=false
+
+      - name: Terraform Apply
+        # prod.tfvars (sem segredo) liga o CloudFront etc.; os SecureString têm o
+        # valor ignorado (ssm.tf), então o apply nunca toca nas chaves dos provedores.
+        run: terraform apply -input=false -auto-approve -var-file=prod.tfvars
