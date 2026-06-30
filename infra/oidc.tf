@@ -64,7 +64,12 @@ data "aws_iam_policy_document" "gha_plan_trust" {
   }
 }
 
-# Role de APPLY: só assumível por jobs rodando NA branch main (merge/push).
+# Role de APPLY: só assumível por jobs ligados ao Environment "production".
+# GOTCHA: quando um job declara `environment: production`, o GitHub troca a claim
+# `sub` do token de `...:ref:refs/heads/main` para `...:environment:production`.
+# Como o job de apply usa o Environment (gate de aprovação), travamos a trust nesse
+# `sub` — o que também é mais forte: a role só é assumível por um deploy que passou
+# pelo gate do Environment, não por qualquer job na main.
 data "aws_iam_policy_document" "gha_apply_trust" {
   statement {
     actions = ["sts:AssumeRoleWithWebIdentity"]
@@ -80,7 +85,7 @@ data "aws_iam_policy_document" "gha_apply_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${local.github_repo}:ref:refs/heads/main"]
+      values   = ["repo:${local.github_repo}:environment:production"]
     }
   }
 }
