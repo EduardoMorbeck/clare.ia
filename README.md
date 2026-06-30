@@ -37,6 +37,71 @@ ser sobrescritos pelo cliente.
   (Mistral/Gemini/Groq/Cerebras). Não há persistência no servidor; o histórico
   vive apenas na aba do navegador e some ao recarregar a página.
 
+## Infraestrutura na AWS
+
+O clare.ia roda numa arquitetura **serverless que escala a zero**: quando ninguém
+usa, nada está ligado e o custo é ~R$ 0. Toda a infra é descrita em **Terraform**
+(`infra/`) e o deploy é **100% automatizado** pelo GitHub Actions via **OIDC**, sem
+nenhuma chave estática no repositório.
+
+> O **porquê** de cada decisão está nos [Architecture Decision Records](docs/adr/).
+
+### Fluxo de uma requisição
+
+O CloudFront é a **porta única**: serve o site estático e repassa `/api/*` ao backend
+(mesma origem → sem CORS).
+
+```mermaid
+graph LR
+  user(["Usuário<br/>(navegador)"])
+  subgraph aws["AWS · us-east-1"]
+    cf["CloudFront<br/>CDN · HTTPS · porta única"]
+    s3[("S3<br/>site estático<br/>(privado, via OAC)")]
+    apigw["API Gateway REST<br/>stage /prod"]
+    lambda["Lambda<br/>FastAPI + Mangum"]
+    ssm[("SSM Parameter Store<br/>SecureString")]
+  end
+  llm{{"Provedores LLM<br/>Gemini · Cerebras · Groq · Mistral"}}
+
+  user -->|HTTPS| cf
+  cf -->|"resto → site"| s3
+  cf -->|"/api/* → backend"| apigw
+  apigw -->|AWS_PROXY| lambda
+  lambda -.->|"cold start: lê chaves"| ssm
+  lambda -->|"fallback em cadeia"| llm
+```
+
+### Pipeline de CI/CD
+
+Um PR roda os testes (CI) e o `terraform plan` (CD, role **read-only**). O merge na
+`main` só aplica depois de **revisão humana** e de um **gate de aprovação** no
+Environment `production` — então usa a role de escrita (escopada por ARN).
+
+```mermaid
+graph TD
+  dev(["Dev"]) -->|push / abre PR| pr["Pull Request"]
+  pr --> ci["CI · ci.yml<br/>ruff · pytest · vitest<br/>build · docker"]
+  pr --> plan["CD plan · deploy.yml<br/>OIDC role gha-plan (read-only)<br/>terraform plan comentado no PR"]
+  ci --> gate{"checks verdes<br/>+ revisão humana"}
+  plan --> gate
+  gate -->|merge na main| approve{"Gate de aprovação<br/>Environment production"}
+  approve -->|approve| apply["CD apply · deploy.yml<br/>OIDC role gha-apply (escrita escopada)"]
+  apply --> tfa["terraform apply"]
+  apply --> fe["build frontend → S3 sync<br/>→ invalida CloudFront"]
+```
+
+### Componentes e custo
+
+| Camada | Serviço | Custo |
+| --- | --- | --- |
+| Frontend | S3 + CloudFront | Centavos de armazenamento/transferência; HTTPS incluso |
+| Backend | Lambda (FastAPI + Mangum) | **1M req/mês grátis, permanente**; escala a zero |
+| Borda HTTP | API Gateway REST | 1M req/mês grátis nos **primeiros 12 meses** |
+| Segredos | SSM Parameter Store | Grátis (tier standard) |
+| IaC | Terraform (state no S3 + lock nativo) | Centavos de armazenamento |
+| CI/CD | GitHub Actions + OIDC | Grátis em repositório público |
+| Guarda-corpos | CloudWatch Logs + AWS Budget | Free tier; Budget alerta no 1º centavo |
+
 ## Pré-requisitos
 
 - Pelo menos uma chave de API entre Mistral, Gemini, Groq e Cerebras.
