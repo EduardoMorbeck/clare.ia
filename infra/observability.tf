@@ -10,6 +10,12 @@
 resource "aws_cloudwatch_log_group" "lambda" {
   name              = "/aws/lambda/${var.project_name}-api"
   retention_in_days = var.log_retention_days
+
+  # A role de apply concede a si mesma a permissão de escrita em Logs
+  # (logs:PutRetentionPolicy etc.) na MESMA config. Sem forçar ordem, o Terraform
+  # poderia tentar a retenção ANTES de aplicar a policy e tomar AccessDenied. Este
+  # depends_on garante que a policy da role de apply seja atualizada primeiro.
+  depends_on = [aws_iam_role_policy.apply_perms]
 }
 
 # ADOÇÃO DE RECURSO EXISTENTE (day-2 ops): o log group acima JÁ existe na AWS real

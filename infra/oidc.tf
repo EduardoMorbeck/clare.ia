@@ -181,6 +181,28 @@ data "aws_iam_policy_document" "tf_apply" {
     resources = ["arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}-*"]
   }
 
+  # CloudWatch Logs: gerir o log group da Lambda (retenção/tags/ciclo de vida) —
+  # só os grupos do projeto. O ReadOnlyAccess já cobre Describe/List/Get; aqui
+  # ficam as AÇÕES DE ESCRITA que o Terraform precisa para o aws_cloudwatch_log_group
+  # (observability.tf), com destaque para PutRetentionPolicy. Ambas as formas de ARN
+  # (o grupo e o grupo:* dos streams) porque a AWS avalia estas ações no nível do grupo.
+  statement {
+    sid = "LambdaLogs"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:DeleteLogGroup",
+      "logs:PutRetentionPolicy",
+      "logs:DeleteRetentionPolicy",
+      "logs:TagResource",
+      "logs:UntagResource",
+      "logs:ListTagsForResource",
+    ]
+    resources = [
+      "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-*",
+      "arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.project_name}-*:*",
+    ]
+  }
+
   # SSM: só os parâmetros do projeto.
   statement {
     sid       = "Ssm"
