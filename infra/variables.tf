@@ -48,6 +48,17 @@ variable "lambda_aws_endpoint_url" {
   default     = ""
 }
 
+variable "log_retention_days" {
+  description = <<-EOT
+    Dias de retenção dos logs da Lambda no CloudWatch. Se a Lambda cria o log
+    group sozinha, ele nasce com retenção "nunca expira" — os logs se acumulam
+    para sempre. Gerir o group no Terraform com uma retenção curta é higiene e
+    evita custo de armazenamento no longo prazo (14 dias basta para depurar).
+  EOT
+  type        = number
+  default     = 14
+}
+
 variable "provider_key_names" {
   description = <<-EOT
     Nomes dos parâmetros SSM de chaves de provedor que SEMPRE existem na infra,
