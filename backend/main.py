@@ -2,6 +2,8 @@ import json
 import logging
 import os
 import re
+import time
+import uuid
 from pathlib import Path
 from typing import Literal
 
@@ -16,8 +18,13 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from starlette.responses import PlainTextResponse
 
+from logging_config import configure_logging
 from providers import build_router_from_env
 from ssm_config import hydrate_env_from_ssm
+
+# Logs estruturados (JSON) antes de qualquer outra coisa, para que até as linhas
+# de bootstrap (hidratação do SSM, provedores ativos) já saiam no formato certo.
+configure_logging()
 
 # Ordem importa: o .env é o baseline (fallback de dev local); o SSM sobrepõe por
 # cima quando `SSM_PARAM_PREFIX` está definido (fonte da verdade na nuvem). Só
@@ -98,6 +105,38 @@ app.add_middleware(
     # Permite que o frontend leia qual provedor de IA respondeu.
     expose_headers=["X-LLM-Provider"],
 )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Registra uma linha estruturada por requisição — só metadados operacionais.
+
+    PRIVACIDADE: nunca logamos o corpo, o texto das mensagens nem o IP do cliente
+    (este app trata conteúdo emocional e não persiste nada). Só rota, status,
+    latência e qual provedor respondeu — o suficiente para operar e depurar.
+    """
+    # Correlação: reaproveita o trace do API Gateway quando existe; senão, gera um.
+    request_id = (
+        request.headers.get("x-amzn-trace-id")
+        or request.headers.get("x-request-id")
+        or uuid.uuid4().hex
+    )
+    start = time.perf_counter()
+    response = await call_next(request)
+    duration_ms = round((time.perf_counter() - start) * 1000, 1)
+
+    logger.info(
+        "request",
+        extra={
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": response.status_code,
+            "duration_ms": duration_ms,
+            "provider": response.headers.get("X-LLM-Provider"),
+        },
+    )
+    return response
 
 PERSONA = """
 Você é a Clare.ia, uma presença de reflexão emocional em português do Brasil.

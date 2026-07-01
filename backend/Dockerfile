@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copia só o código da aplicação (o .dockerignore cuida de excluir .venv etc.).
-COPY main.py providers.py ./
+COPY main.py providers.py ssm_config.py logging_config.py ./
 
 # Roda como usuário não-root.
 RUN useradd --create-home --uid 1000 appuser
